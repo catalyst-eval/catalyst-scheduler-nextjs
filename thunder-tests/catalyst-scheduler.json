@@ -1,0 +1,139 @@
+{
+    "client": "Thunder Client",
+    "collectionName": "Catalyst Scheduler",
+    "dateExported": "2025-02-12T17:30:00.000Z",
+    "version": "1.1",
+    "folders": [
+      {
+        "name": "Webhooks",
+        "items": [
+          {
+            "name": "Create Appointment",
+            "request": {
+              "method": "POST",
+              "url": "{{baseUrl}}/api/webhooks/intakeq",
+              "headers": [
+                {
+                  "name": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": {
+                "type": "json",
+                "raw": {
+                  "Type": "Appointment Created",
+                  "ClientId": "TEST001",
+                  "Appointment": {
+                    "Id": "APT-001",
+                    "ClientId": "TEST001",
+                    "PractitionerId": "PRAC-001",
+                    "StartDateIso": "2025-02-13T09:00:00Z",
+                    "EndDateIso": "2025-02-13T10:00:00Z",
+                    "Duration": 60,
+                    "ServiceName": "Individual Therapy",
+                    "Status": "scheduled"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "name": "Submit Accessibility Form",
+            "request": {
+              "method": "POST",
+              "url": "{{baseUrl}}/api/webhooks/intakeq",
+              "headers": [
+                {
+                  "name": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": {
+                "type": "json",
+                "raw": {
+                  "Type": "Form Submitted",
+                  "ClientId": "TEST001",
+                  "formId": "67a52367e11d09a2b82d57a9",
+                  "responses": {
+                    "clientName": "Test Client",
+                    "clientEmail": "test@example.com",
+                    "mobilityDevices": ["wheelchair"],
+                    "sensoryPreferences": ["quiet"],
+                    "roomConsistency": "1 - Strong preference for consistency"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      {
+        "name": "Scheduling",
+        "items": [
+          {
+            "name": "Get Schedule Data",
+            "request": {
+              "method": "GET",
+              "url": "{{baseUrl}}/api/scheduling/data",
+              "params": [
+                {
+                  "name": "startDate",
+                  "value": "2025-02-13"
+                },
+                {
+                  "name": "endDate",
+                  "value": "2025-02-13"
+                }
+              ]
+            }
+          },
+          {
+            "name": "Validate Schedule",
+            "request": {
+              "method": "POST",
+              "url": "{{baseUrl}}/api/scheduling/validate",
+              "headers": [
+                {
+                  "name": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": {
+                "type": "json",
+                "raw": {
+                  "clientId": "TEST001",
+                  "clinicianId": "PRAC-001",
+                  "dateTime": "2025-02-13T09:00:00Z",
+                  "duration": 60,
+                  "sessionType": "in-person",
+                  "requirements": {
+                    "accessibility": true
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "environments": [
+      {
+        "name": "Local",
+        "data": [
+          {
+            "name": "baseUrl",
+            "value": "http://localhost:3000"
+          }
+        ]
+      },
+      {
+        "name": "Development",
+        "data": [
+          {
+            "name": "baseUrl",
+            "value": "https://catalyst-scheduler-dev.vercel.app"
+          }
+        ]
+      }
+    ]
+  }
