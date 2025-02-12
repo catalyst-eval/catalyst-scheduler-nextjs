@@ -39,7 +39,7 @@ export async function POST(
     const sheetsService = await initializeGoogleSheets();
     
     // Process based on webhook type
-    if (payload.Type === 'Intake Submitted') {
+    if (payload.Type === 'Intake Submitted' || payload.Type === 'Form Submitted') {
       // Handle form submissions
       if (payload.formId === '67a52367e11d09a2b82d57a9') {
         if (!payload.responses) {

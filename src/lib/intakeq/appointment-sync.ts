@@ -105,7 +105,7 @@ import { RecipientManagementService } from '@/lib/email/recipients';
       try {
         // Convert to scheduling request format
         const request = this.convertToSchedulingRequest(appointment);
-  
+
         // Log the creation attempt
         await this.sheetsService.addAuditLog({
           timestamp: new Date().toISOString(),
@@ -114,91 +114,112 @@ import { RecipientManagementService } from '@/lib/email/recipients';
           user: 'SYSTEM',
           systemNotes: JSON.stringify(request)
         });
-    
-    // Check for existing appointments on the same day
-    const appointmentDate = new Date(appointment.StartDateIso).toISOString().split('T')[0];
-    const existingAppointments = await this.sheetsService.getAppointments(
-      `${appointmentDate}T00:00:00Z`,
-      `${appointmentDate}T23:59:59Z`
-    );
 
-    // Validate schedule
-    const validationResult = await this.validateScheduleInRealTime(request, existingAppointments);
-    if (!validationResult.isValid) {
-      throw new Error(`Scheduling validation failed: ${validationResult.conflicts.map(c => c.description).join(', ')}`);
-    }
+        // Check for existing appointments on the same day
+        const appointmentDate = new Date(appointment.StartDateIso).toISOString().split('T')[0];
+        const existingAppointments = await this.sheetsService.getAppointments(
+          `${appointmentDate}T00:00:00Z`,
+          `${appointmentDate}T23:59:59Z`
+        );
 
-    // Create office assignment service instance
-    const assignmentService = new OfficeAssignmentService(
-      await this.sheetsService.getOffices(),
-      await this.sheetsService.getAssignmentRules(),
-      await this.getClientPreference(appointment.ClientId.toString()),
-      this.createBookingsMap(existingAppointments)
-    );
+        // Validate schedule
+        const validationResult = await this.validateScheduleInRealTime(request, existingAppointments);
+        if (!validationResult.isValid) {
+          return {
+            success: false,
+            error: `Scheduling validation failed: ${validationResult.conflicts.map(c => c.description).join(', ')}`,
+            appointmentId: appointment.Id,
+            action: 'validation-failed'
+          };
+        }
 
-    // Find optimal office
-    const assignmentResult = await assignmentService.findOptimalOffice(request);
-    
-    if (!assignmentResult.success) {
-      throw new Error(assignmentResult.error || 'Failed to find suitable office');
-    }
+        // Create office assignment service instance
+        const assignmentService = new OfficeAssignmentService(
+          await this.sheetsService.getOffices(),
+          await this.sheetsService.getAssignmentRules(),
+          await this.getClientPreference(appointment.ClientId.toString()),
+          this.createBookingsMap(existingAppointments)
+        );
 
-    // Create appointment record
-    const appointmentRecord: AppointmentRecord = {
-        appointmentId: appointment.Id,
-        clientId: appointment.ClientId.toString(),
-        clinicianId: appointment.PractitionerId,
-        officeId: assignmentResult.officeId!,
-        sessionType: this.determineSessionType(appointment),
-        startTime: appointment.StartDateIso,
-        endTime: appointment.EndDateIso,
-        status: 'scheduled',
-        lastUpdated: new Date().toISOString(),
-        source: 'intakeq',
-        requirements: {
-          accessibility: request.requirements?.accessibility ?? false,
-          specialFeatures: request.requirements?.specialFeatures ?? []
-        },
-        notes: assignmentResult.notes
-      };
+        // Find optimal office
+        const assignmentResult = await assignmentService.findOptimalOffice(request);
+        
+        if (!assignmentResult.success) {
+          return {
+            success: false,
+            error: assignmentResult.error || 'Failed to find suitable office',
+            appointmentId: appointment.Id,
+            action: 'office-assignment-failed'
+          };
+        }
 
-    // Store appointment
-    await this.sheetsService.addAppointment(appointmentRecord);    
+        // Create appointment record
+        const appointmentRecord: AppointmentRecord = {
+          appointmentId: appointment.Id,
+          clientId: appointment.ClientId.toString(),
+          clinicianId: appointment.PractitionerId,
+          officeId: assignmentResult.officeId!,
+          sessionType: this.determineSessionType(appointment),
+          startTime: appointment.StartDateIso,
+          endTime: appointment.EndDateIso,
+          status: 'scheduled',
+          lastUpdated: new Date().toISOString(),
+          source: 'intakeq',
+          requirements: {
+            accessibility: request.requirements?.accessibility ?? false,
+            specialFeatures: request.requirements?.specialFeatures ?? []
+          },
+          notes: assignmentResult.notes
+        };
 
-        // Get client preferences if they exist
-        const clientPrefs = await this.sheetsService.getClientPreferences();
-        const clientPref = clientPrefs.find(p => p.clientId === appointment.ClientId.toString());
-  
+        // Store appointment
+        await this.sheetsService.addAppointment(appointmentRecord);
+
         // After storing the appointment, send notifications
-    const emailService = await initializeEmailService(this.sheetsService);
-    const recipientService = new RecipientManagementService(this.sheetsService);
-    
-    // Get daily summary using dedicated service
-    const summaryService = new DailySummaryService(
-      await this.sheetsService.getOffices(),
-      existingAppointments
-    );
-    const summary = await summaryService.generateDailySummary(
-      new Date(appointment.StartDateIso).toISOString().split('T')[0]
-    );
+        const emailService = await initializeEmailService(this.sheetsService);
+        const recipientService = new RecipientManagementService(this.sheetsService);
+        
+        // Get daily summary using dedicated service
+        const summaryService = new DailySummaryService(
+          await this.sheetsService.getOffices(),
+          [...existingAppointments, appointmentRecord]
+        );
+        const summary = await summaryService.generateDailySummary(
+          new Date(appointment.StartDateIso).toISOString().split('T')[0]
+        );
 
-    // Send updated schedule
-    const recipients = await recipientService.getDailyScheduleRecipients();
-    const template = EmailTemplates.dailySchedule(summary);
-    await emailService.sendEmail(recipients, template, {
-      type: 'schedule',
-      priority: 'normal',
-      retryCount: 3
-    });
+        // Send updated schedule
+        const recipients = await recipientService.getDailyScheduleRecipients();
+        const template = EmailTemplates.dailySchedule(summary);
+        await emailService.sendEmail(recipients, template, {
+          type: 'schedule',
+          priority: 'normal',
+          retryCount: 3
+        });
 
-    return {
-      success: true,
-      appointmentId: appointment.Id,
-      action: 'created'
-    };
-  } catch (error) {
+        return {
+          success: true,
+          appointmentId: appointment.Id,
+          action: 'created'
+        };
+      } catch (error) {
         console.error('Error handling new appointment:', error);
-        throw error;
+        
+        // Log the error
+        await this.sheetsService.addAuditLog({
+          timestamp: new Date().toISOString(),
+          eventType: AuditEventType.SYSTEM_ERROR,
+          description: `Error processing appointment ${appointment.Id}`,
+          user: 'SYSTEM',
+          systemNotes: error instanceof Error ? error.message : 'Unknown error'
+        });
+
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error occurred',
+          appointmentId: appointment.Id,
+          action: 'error'
+        };
       }
     }
   

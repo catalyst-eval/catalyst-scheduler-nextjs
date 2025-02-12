@@ -1,5 +1,13 @@
 // src/types/webhooks.ts
 
+export type WebhookEventType = 
+  | 'Form Submitted'
+  | 'Intake Submitted'
+  | 'Appointment Created'
+  | 'Appointment Updated'
+  | 'Appointment Rescheduled'
+  | 'Appointment Cancelled';
+
 export interface IntakeQAppointment {
   Id: string;
   ClientName: string;
@@ -29,19 +37,24 @@ export interface IntakeQAppointment {
   StartDateLocal: string;
   EndDateLocal: string;
   StartDateLocalFormatted: string;
-  [key: string]: any; // For additional fields
+  CancellationReason?: string;
+  RecurrencePattern?: {
+    frequency: 'weekly' | 'biweekly' | 'monthly';
+    occurrences: number;
+    endDate?: string;
+  };
+  [key: string]: any;
 }
 
 export interface IntakeQWebhookPayload {
   IntakeId?: string;
-  Type: 'Intake Submitted' | 'Appointment Created' | 'Appointment Updated' | 'Appointment Rescheduled' | 'Appointment Cancelled';
+  Type: WebhookEventType;
   ClientId: number;
   ExternalClientId?: string;
   PracticeId: string;
   ExternalPracticeId?: string | null;
   formId?: string;
   responses?: Record<string, any>;
-  // Appointment specific fields
   EventType?: string;
   Appointment?: IntakeQAppointment;
   ActionPerformedByClient?: boolean;
@@ -50,5 +63,16 @@ export interface IntakeQWebhookPayload {
 export interface WebhookResponse {
   success: boolean;
   error?: string;
-  data?: any;
+  details?: any;
+}
+
+export class WebhookError extends Error {
+  constructor(
+    message: string,
+    public readonly statusCode: number = 500,
+    public readonly details?: any
+  ) {
+    super(message);
+    this.name = 'WebhookError';
+  }
 }
