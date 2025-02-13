@@ -6,15 +6,12 @@ import { AppointmentSyncHandler } from '@/lib/intakeq/appointment-sync';
 import { processAccessibilityForm } from '@/lib/intakeq/accessibility-form';
 import type { IntakeQWebhookPayload, WebhookResponse } from '@/types/webhooks';
 
-class WebhookError extends Error {
-  constructor(
-    message: string,
-    public readonly statusCode: number = 500,
-    public readonly details?: any
-  ) {
-    super(message);
-    this.name = 'WebhookError';
-  }
+export async function GET() {
+  return NextResponse.json({
+    status: 'ok',
+    message: 'IntakeQ webhook endpoint active',
+    timestamp: new Date().toISOString()
+  });
 }
 
 export async function POST(
@@ -28,11 +25,11 @@ export async function POST(
     try {
       payload = JSON.parse(rawBody);
     } catch (e) {
-      throw new WebhookError('Invalid JSON payload', 400);
+      throw new Error('Invalid JSON payload');
     }
 
     if (!payload.Type || !payload.ClientId) {
-      throw new WebhookError('Missing required fields', 400);
+      throw new Error('Missing required fields');
     }
 
     // Initialize services
@@ -43,7 +40,7 @@ export async function POST(
       // Handle form submissions
       if (payload.formId === '67a52367e11d09a2b82d57a9') {
         if (!payload.responses) {
-          throw new WebhookError('Missing form responses', 400);
+          throw new Error('Missing form responses');
         }
 
         const clientPrefs = processAccessibilityForm({
@@ -61,10 +58,10 @@ export async function POST(
       const result = await appointmentHandler.processAppointmentEvent(payload);
       
       if (!result.success) {
-        throw new WebhookError(result.error || 'Appointment processing failed', 500);
+        throw new Error(result.error || 'Appointment processing failed');
       }
     } else {
-      throw new WebhookError(`Unsupported event type: ${payload.Type}`, 400);
+      throw new Error(`Unsupported event type: ${payload.Type}`);
     }
 
     return NextResponse.json({ success: true });
@@ -86,13 +83,11 @@ export async function POST(
       console.error('Failed to log error:', logError);
     }
     
-    const statusCode = error instanceof WebhookError ? error.statusCode : 500;
-    
     return NextResponse.json({
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error occurred'
     }, { 
-      status: statusCode 
+      status: 500 
     });
   }
 }

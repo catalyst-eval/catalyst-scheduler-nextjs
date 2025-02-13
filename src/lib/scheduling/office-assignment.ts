@@ -1,9 +1,8 @@
-// src/lib/scheduling/office-assignment.ts
-
 import type { 
   SheetOffice, 
   AssignmentRule, 
-  ClientPreference
+  ClientPreference,
+  SheetClinician
 } from '@/types/sheets';
 
 import type {
@@ -12,379 +11,409 @@ import type {
   SchedulingConflict
 } from '@/types/scheduling';
 
-import { ConflictResolutionService } from './conflict-resolution';
-
 interface RuleEvaluationResult {
-  officeId: string;
+  score: number;
+  reason: string;
+  log: string[];
+}
+
+interface OfficeScore {
+  office: SheetOffice;
   score: number;
   reasons: string[];
-  isHardMatch: boolean;
-  evaluationLog: string[];
-  conflicts?: SchedulingConflict[];
+  conflicts: SchedulingConflict[];
+  log: string[];
 }
 
 export class OfficeAssignmentService {
-  private conflictResolver: ConflictResolutionService;
-
   constructor(
     private readonly offices: SheetOffice[],
     private readonly rules: AssignmentRule[],
-    private readonly clientPreferences?: ClientPreference,
+    private readonly clinicians: SheetClinician[],
+    private readonly clientPreference?: ClientPreference,
     private readonly existingBookings: Map<string, SchedulingRequest[]> = new Map()
-  ) {
-    this.conflictResolver = new ConflictResolutionService(offices, existingBookings);
-  }
+  ) {}
 
   async findOptimalOffice(request: SchedulingRequest): Promise<SchedulingResult> {
+    const log: string[] = [`Starting office assignment for request: ${JSON.stringify(request)}`];
+    
     try {
-      console.log('Starting office assignment for:', {
-        clientId: request.clientId,
-        clinicianId: request.clinicianId,
-        sessionType: request.sessionType,
-        clientAge: request.clientAge,
-        requirements: request.requirements
-      });
+      // 1. Get clinician details
+      const clinician = this.clinicians.find(c => c.clinicianId === request.clinicianId);
+      if (!clinician) {
+        throw new Error(`Clinician ${request.clinicianId} not found`);
+      }
+      log.push(`Found clinician: ${clinician.name} (${clinician.role})`);
 
-      // Get all valid offices based on hard requirements
-      const validOffices = this.filterValidOffices(request);
-      console.log(`Found ${validOffices.length} valid offices after basic filtering`);
-      
+      // 2. Filter valid offices based on basic requirements
+      const validOffices = this.filterValidOffices(request, clinician);
+      log.push(`Found ${validOffices.length} initially valid offices`);
+
       if (validOffices.length === 0) {
         return {
           success: false,
-          error: 'No offices match the basic requirements'
+          error: 'No offices match basic requirements',
+          evaluationLog: log
         };
       }
 
-      // Check for conflicts and potential resolutions
-      const officeEvaluations = await Promise.all(
-        validOffices.map(async (office) => {
-          const conflicts = await this.conflictResolver.checkConflicts(
-            office.officeId,
-            request
-          );
+      // 3. Score each valid office
+      const scoredOffices: OfficeScore[] = [];
+      
+      for (const office of validOffices) {
+        const score = await this.scoreOffice(office, request, clinician);
+        scoredOffices.push(score);
+        log.push(`Scored office ${office.officeId}: ${score.score} points`);
+        log.push(...score.log);
+      }
 
-          // If there are unresolvable conflicts, mark this office as invalid
-          const hasUnresolvableConflict = conflicts.some(
-            conflict => conflict.resolution?.type === 'cannot-relocate'
-          );
-
-          if (hasUnresolvableConflict) {
-            return null;
-          }
-
-          const evaluation = await this.evaluateOffice(office, request);
-          return {
-            ...evaluation,
-            conflicts
-          };
-        })
+      // 4. Sort by score and check for hard matches
+      const hardMatches = scoredOffices.filter(score => 
+        score.reasons.some(reason => reason.startsWith('HARD:'))
       );
 
-      // Filter out offices with unresolvable conflicts
-      const validEvaluations = officeEvaluations.filter((result): result is (RuleEvaluationResult & { conflicts: SchedulingConflict[] }) => 
-        result !== null
-      );
+      const candidates = hardMatches.length > 0 ? hardMatches : scoredOffices;
+      candidates.sort((a, b) => b.score - a.score);
 
-      // Sort by score and filter for hard matches if any exist
-      const hardMatches = validEvaluations.filter(result => result.isHardMatch);
-      console.log(`Found ${hardMatches.length} hard matches`);
-
-      const sortedEvaluations = hardMatches.length > 0 
-        ? hardMatches 
-        : validEvaluations;
-
-      sortedEvaluations.sort((a, b) => b.score - a.score);
-
-      if (sortedEvaluations.length === 0) {
+      if (candidates.length === 0) {
         return {
           success: false,
-          error: 'No suitable offices found after conflict resolution and rule evaluation'
+          error: 'No suitable offices found after scoring',
+          evaluationLog: log
         };
       }
 
-      const bestMatch = sortedEvaluations[0];
-      console.log('Best match found:', {
-        officeId: bestMatch.officeId,
-        score: bestMatch.score,
-        reasons: bestMatch.reasons,
-        conflicts: bestMatch.conflicts,
-        evaluationLog: bestMatch.evaluationLog
-      });
-      
+      const bestMatch = candidates[0];
+      log.push(`Selected office ${bestMatch.office.officeId} with score ${bestMatch.score}`);
+      log.push(`Assignment reasons: ${bestMatch.reasons.join(', ')}`);
+
       return {
         success: true,
-        officeId: bestMatch.officeId,
+        officeId: bestMatch.office.officeId,
         conflicts: bestMatch.conflicts,
         notes: bestMatch.reasons.join('; '),
-        evaluationLog: bestMatch.evaluationLog
+        evaluationLog: [...log, ...bestMatch.log]
       };
+
     } catch (error) {
-      console.error('Error finding optimal office:', error);
+      log.push(`Error in office assignment: ${error instanceof Error ? error.message : 'Unknown error'}`);
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error occurred'
+        error: error instanceof Error ? error.message : 'Unknown error occurred',
+        evaluationLog: log
       };
     }
   }
 
-  private filterValidOffices(request: SchedulingRequest): SheetOffice[] {
+  private filterValidOffices(
+    request: SchedulingRequest,
+    clinician: SheetClinician
+  ): SheetOffice[] {
+    const log: string[] = [];
+    
     return this.offices.filter(office => {
       // Check if office is in service
       if (!office.inService) {
-        console.log(`Office ${office.officeId} is not in service`);
+        log.push(`Office ${office.officeId} filtered: not in service`);
         return false;
       }
 
       // Check accessibility requirements
       if (request.requirements?.accessibility && !office.isAccessible) {
-        console.log(`Office ${office.officeId} does not meet accessibility requirements`);
+        log.push(`Office ${office.officeId} filtered: accessibility requirements not met`);
         return false;
       }
 
-      // Check if specific room was requested
-      if (request.requirements?.roomPreference && 
-          office.officeId !== request.requirements.roomPreference) {
-        console.log(`Office ${office.officeId} does not match room preference`);
+      // Check clinician preferences - BUT don't exclude if they're the primary clinician
+      if (office.primaryClinician !== clinician.clinicianId && 
+          clinician.preferredOffices.length > 0 && 
+          !clinician.preferredOffices.includes(office.officeId)) {
+        log.push(`Office ${office.officeId} filtered: not in clinician's preferred offices`);
         return false;
       }
 
       // Check special features
-      if (request.requirements?.specialFeatures) {
+      if (request.requirements?.specialFeatures?.length) {
         const hasAllFeatures = request.requirements.specialFeatures.every(
-          (feature: string) => office.specialFeatures.includes(feature)
+          feature => office.specialFeatures.includes(feature)
         );
         if (!hasAllFeatures) {
-          console.log(`Office ${office.officeId} missing required features`);
+          log.push(`Office ${office.officeId} filtered: missing required features`);
           return false;
         }
+      }
+
+      // Check session type requirements
+      if (request.sessionType === 'group' && 
+          !office.specialFeatures.includes('group')) {
+        log.push(`Office ${office.officeId} filtered: not suitable for group sessions`);
+        return false;
       }
 
       return true;
     });
   }
 
-  private async evaluateOffice(
-    office: SheetOffice, 
-    request: SchedulingRequest
-  ): Promise<RuleEvaluationResult> {
-    const result: RuleEvaluationResult = {
-      officeId: office.officeId,
+  private async scoreOffice(
+    office: SheetOffice,
+    request: SchedulingRequest,
+    clinician: SheetClinician
+  ): Promise<OfficeScore> {
+    const score: OfficeScore = {
+      office,
       score: 0,
       reasons: [],
-      isHardMatch: false,
-      evaluationLog: [`Starting evaluation for office ${office.officeId}`]
+      conflicts: [],
+      log: [`Starting evaluation for office ${office.officeId}`]
     };
 
-    // Sort rules by priority
+    // 1. Check existing bookings and conflicts
+    const existingBookings = this.existingBookings.get(office.officeId) || [];
+    const timeConflicts = this.checkTimeConflicts(request, existingBookings);
+    
+    if (timeConflicts.length > 0) {
+      score.log.push(`Found ${timeConflicts.length} time conflicts`);
+      score.conflicts = timeConflicts;
+      return score;
+    }
+
+    // 2. Apply base scoring
+    
+    // Primary clinician office gets highest base score
+    if (office.primaryClinician === clinician.clinicianId) {
+      score.score += 1000;
+      score.reasons.push('HARD: Primary clinician office');
+      score.log.push('Added 1000 points: Primary clinician office');
+    }
+    
+    // Alternative clinicians get good but lower score
+    else if (office.alternativeClinicians?.includes(clinician.clinicianId)) {
+      score.score += 500;
+      score.reasons.push('Alternative clinician office');
+      score.log.push('Added 500 points: Alternative clinician office');
+    }
+    
+    // Preferred office bonus
+    if (clinician.preferredOffices.includes(office.officeId)) {
+      score.score += 200;
+      score.reasons.push('Clinician preferred office');
+      score.log.push('Added 200 points: Clinician preferred office');
+    }
+
+    // 3. Apply rules in priority order
     const sortedRules = [...this.rules]
       .filter(rule => rule.active)
       .sort((a, b) => a.priority - b.priority);
 
     for (const rule of sortedRules) {
-      const { score, log } = await this.evaluateRule(rule, office, request);
-      result.evaluationLog.push(...log);
-      
-      if (score > 0) {
-        result.score += score;
-        result.reasons.push(`Matches ${rule.ruleName}`);
-        
-        if (rule.overrideLevel === 'hard') {
-          result.isHardMatch = true;
-          result.evaluationLog.push(`Hard match found for rule: ${rule.ruleName}`);
-        }
+      const ruleScore = this.evaluateRule(rule, office, request, clinician);
+      score.score += ruleScore.score;
+      if (ruleScore.score > 0) {
+        score.reasons.push(ruleScore.reason);
+        score.log.push(...ruleScore.log);
       }
     }
 
-    // Evaluate client preferences
-    if (this.clientPreferences) {
-      const { prefScore, prefLog } = this.evaluateClientPreferences(office);
-      result.score += prefScore;
-      result.evaluationLog.push(...prefLog);
-      if (prefScore > 0) {
-        result.reasons.push('Matches client preferences');
+    // 4. Apply client preferences if available
+    if (this.clientPreference) {
+      const prefScore = this.evaluateClientPreferences(office);
+      score.score += prefScore.score;
+      if (prefScore.score > 0) {
+        score.reasons.push(...prefScore.reasons);
+        score.log.push(...prefScore.log);
       }
     }
 
-    result.evaluationLog.push(`Final score for ${office.officeId}: ${result.score}`);
-    return result;
+    // 5. Apply session type specific scoring
+    const sessionScore = this.evaluateSessionType(office, request.sessionType);
+    score.score += sessionScore.score;
+    if (sessionScore.score > 0) {
+      score.reasons.push(sessionScore.reason);
+      score.log.push(...sessionScore.log);
+    }
+
+    score.log.push(`Final score for ${office.officeId}: ${score.score}`);
+    return score;
   }
 
-  /**
-   * Evaluate a single rule for an office
-   */
-  private async evaluateRule(
+  private evaluateRule(
     rule: AssignmentRule,
     office: SheetOffice,
-    request: SchedulingRequest
-  ): Promise<{ score: number; log: string[] }> {
-    const log: string[] = [];
-    log.push(`Evaluating rule: ${rule.ruleName} (${rule.ruleType})`);
-
-    // Check if office is in the rule's office list
+    request: SchedulingRequest,
+    clinician: SheetClinician
+  ): RuleEvaluationResult {
+    const log: string[] = [`Evaluating rule: ${rule.ruleName}`];
+    
+    // Check if this rule applies to this office
     if (!rule.officeIds.includes(office.officeId)) {
-      log.push(`Office ${office.officeId} not in rule's office list`);
-      return { score: 0, log };
+      return { score: 0, reason: '', log: [`Rule ${rule.ruleName} doesn't apply to office ${office.officeId}`] };
     }
 
-    let score = 0;
     switch (rule.ruleType) {
       case 'accessibility':
-        score = this.evaluateAccessibilityRule(rule, office, request);
-        log.push(`Accessibility score: ${score}`);
+        if (request.requirements?.accessibility && office.isAccessible) {
+          const score = rule.overrideLevel === 'hard' ? 1000 : 200;
+          return {
+            score,
+            reason: rule.overrideLevel === 'hard' ? `HARD: ${rule.ruleName}` : rule.ruleName,
+            log: [`Added ${score} points for accessibility match`]
+          };
+        }
         break;
 
       case 'age_group':
-        score = this.evaluateAgeGroupRule(rule, office, request);
-        log.push(`Age group score: ${score}`);
+        if (request.clientAge) {
+          const condition = rule.condition;
+          if (this.evaluateAgeCondition(condition, request.clientAge)) {
+            const score = rule.overrideLevel === 'hard' ? 800 : 150;
+            return {
+              score,
+              reason: rule.overrideLevel === 'hard' ? `HARD: ${rule.ruleName}` : rule.ruleName,
+              log: [`Added ${score} points for age group match`]
+            };
+          }
+        }
         break;
 
-      case 'clinician_primary':
-        score = this.evaluatePrimaryClinicianRule(rule, office, request);
-        log.push(`Primary clinician score: ${score}`);
+      case 'session_type':
+        if (request.sessionType === rule.condition) {
+          const score = rule.overrideLevel === 'hard' ? 600 : 100;
+          return {
+            score,
+            reason: rule.overrideLevel === 'hard' ? `HARD: ${rule.ruleName}` : rule.ruleName,
+            log: [`Added ${score} points for session type match`]
+          };
+        }
         break;
-
-      case 'clinician_alternative':
-        score = this.evaluateAlternativeClinicianRule(rule, office, request);
-        log.push(`Alternative clinician score: ${score}`);
-        break;
-
-      case 'room_type':
-        score = this.evaluateRoomTypeRule(rule, office, request);
-        log.push(`Room type score: ${score}`);
-        break;
-
-      default:
-        log.push(`Unknown rule type: ${rule.ruleType}`);
     }
 
-    log.push(`Final score for rule: ${score}`);
-    return { score, log };
+    return { score: 0, reason: '', log: [`No points added for rule ${rule.ruleName}`] };
   }
 
-  /**
-   * Evaluate age group rules
-   */
-  private evaluateAgeGroupRule(
-    rule: AssignmentRule,
-    office: SheetOffice,
-    request: SchedulingRequest
-  ): number {
-    if (!request.clientAge) return 0;
+  private evaluateClientPreferences(office: SheetOffice): {
+    score: number;
+    reasons: string[];
+    log: string[];
+  } {
+    const result = {
+      score: 0,
+      reasons: [] as string[],
+      log: ['Evaluating client preferences']
+    };
 
-    const condition = rule.condition;
-    if (condition.includes('<=')) {
-      const maxAge = parseInt(condition.split('<=')[1].trim());
-      if (request.clientAge <= maxAge) {
-        return rule.overrideLevel === 'hard' ? 1000 : 100;
+    if (!this.clientPreference) {
+      result.log.push('No client preferences available');
+      return result;
+    }
+
+    // Check previous office assignment
+    if (this.clientPreference.assignedOffice === office.officeId) {
+      const roomScore = (this.clientPreference.roomConsistency || 0) * 50;
+      result.score += roomScore;
+      result.reasons.push('Previous office match');
+      result.log.push(`Added ${roomScore} points for previous office match`);
+    }
+
+    // Safely check mobility needs
+    const mobilityNeeds = this.clientPreference.mobilityNeeds || [];
+    if (Array.isArray(mobilityNeeds) && mobilityNeeds.length > 0 && office.isAccessible) {
+      result.score += 300;
+      result.reasons.push('Meets mobility needs');
+      result.log.push('Added 300 points for mobility needs match');
+    }
+
+    // Safely check sensory preferences
+    const sensoryPrefs = this.clientPreference.sensoryPreferences || [];
+    if (Array.isArray(sensoryPrefs) && sensoryPrefs.length > 0) {
+      const matchingSensory = sensoryPrefs.filter(
+        pref => office.specialFeatures.includes(pref)
+      );
+      if (matchingSensory.length > 0) {
+        const sensoryScore = matchingSensory.length * 50;
+        result.score += sensoryScore;
+        result.reasons.push('Matches sensory preferences');
+        result.log.push(`Added ${sensoryScore} points for sensory preference matches`);
       }
-    } else if (condition.includes('&&')) {
+    }
+
+    return result;
+  }
+
+  private evaluateSessionType(
+    office: SheetOffice,
+    sessionType: string
+  ): RuleEvaluationResult {
+    switch (sessionType) {
+      case 'group':
+        if (office.specialFeatures.includes('group')) {
+          return {
+            score: 200,
+            reason: 'Suitable for group sessions',
+            log: ['Added 200 points for group session capability']
+          };
+        }
+        break;
+
+      case 'family':
+        if (office.size === 'large') {
+          return {
+            score: 150,
+            reason: 'Suitable size for family sessions',
+            log: ['Added 150 points for family session size']
+          };
+        }
+        break;
+    }
+
+    return { score: 0, reason: '', log: ['No specific session type points added'] };
+  }
+
+  private evaluateAgeCondition(condition: string, age: number): boolean {
+    // Handle different age condition formats
+    if (condition.includes('&&')) {
       const [minStr, maxStr] = condition.split('&&');
       const minAge = parseInt(minStr.split('>')[1].trim());
       const maxAge = parseInt(maxStr.split('<=')[1].trim());
-      if (request.clientAge > minAge && request.clientAge <= maxAge) {
-        return rule.overrideLevel === 'hard' ? 1000 : 100;
+      return age > minAge && age <= maxAge;
+    }
+    
+    if (condition.includes('<=')) {
+      const maxAge = parseInt(condition.split('<=')[1].trim());
+      return age <= maxAge;
+    }
+    
+    if (condition.includes('>=')) {
+      const minAge = parseInt(condition.split('>=')[1].trim());
+      return age >= minAge;
+    }
+
+    return false;
+  }
+
+  private checkTimeConflicts(
+    request: SchedulingRequest,
+    existingBookings: SchedulingRequest[]
+  ): SchedulingConflict[] {
+    const conflicts: SchedulingConflict[] = [];
+    const requestStart = new Date(request.dateTime);
+    const requestEnd = new Date(requestStart.getTime() + (request.duration * 60 * 1000));
+
+    existingBookings.forEach(booking => {
+      const bookingStart = new Date(booking.dateTime);
+      const bookingEnd = new Date(bookingStart.getTime() + (booking.duration * 60 * 1000));
+
+      if (requestStart < bookingEnd && requestEnd > bookingStart) {
+        conflicts.push({
+          officeId: request.clinicianId, // Using clinicianId for tracking
+          existingBooking: booking,
+          resolution: {
+            type: 'cannot-relocate',
+            reason: 'Time slot overlap with existing booking'
+          }
+        });
       }
-    }
-    return 0;
-  }
+    });
 
-  /**
-   * Evaluate accessibility rules
-   */
-  private evaluateAccessibilityRule(
-    rule: AssignmentRule,
-    office: SheetOffice,
-    request: SchedulingRequest
-  ): number {
-    if (!request.requirements?.accessibility) return 0;
-    
-    if (office.isAccessible) {
-      return rule.overrideLevel === 'hard' ? 1000 : 100;
-    }
-    
-    return 0;
-  }
-
-  /**
-   * Evaluate primary clinician rules
-   */
-  private evaluatePrimaryClinicianRule(
-    rule: AssignmentRule,
-    office: SheetOffice,
-    request: SchedulingRequest
-  ): number {
-    if (office.primaryClinician === request.clinicianId) {
-      return rule.overrideLevel === 'hard' ? 500 : 100;
-    }
-    return 0;
-  }
-
-  /**
-   * Evaluate alternative clinician rules
-   */
-  private evaluateAlternativeClinicianRule(
-    rule: AssignmentRule,
-    office: SheetOffice,
-    request: SchedulingRequest
-  ): number {
-    const clinicians = rule.condition.split('=')[1].trim()
-      .replace(/['"]/g, '')
-      .split(',')
-      .map(c => c.trim());
-
-    if (clinicians.includes(request.clinicianId)) {
-      return rule.overrideLevel === 'hard' ? 250 : 50;
-    }
-    return 0;
-  }
-
-  /**
-   * Evaluate room type rules
-   */
-  private evaluateRoomTypeRule(
-    rule: AssignmentRule,
-    office: SheetOffice,
-    request: SchedulingRequest
-  ): number {
-    if (request.sessionType === 'group' && office.specialFeatures.includes('group')) {
-      return rule.overrideLevel === 'hard' ? 300 : 75;
-    }
-    return 0;
-  }
-
-  /**
-   * Evaluate client preferences for an office
-   */
-  private evaluateClientPreferences(office: SheetOffice): { prefScore: number; prefLog: string[] } {
-    if (!this.clientPreferences) return { prefScore: 0, prefLog: ['No client preferences available'] };
-    
-    const prefLog: string[] = ['Evaluating client preferences'];
-    let prefScore = 0;
-
-    // Check if this is their previously assigned office
-    if (this.clientPreferences.assignedOffice === office.officeId) {
-      const roomScore = this.clientPreferences.roomConsistency * 10;
-      prefScore += roomScore;
-      prefLog.push(`Previous office match score: ${roomScore}`);
-    }
-
-    // Check if office meets mobility needs
-    if (this.clientPreferences.mobilityNeeds.length > 0 && office.isAccessible) {
-      prefScore += 50;
-      prefLog.push('Mobility needs score: 50');
-    }
-
-    // Check if office has required features for sensory preferences
-    const hasRequiredFeatures = this.clientPreferences.sensoryPreferences.every(
-      pref => office.specialFeatures.includes(pref)
-    );
-    if (hasRequiredFeatures) {
-      prefScore += 30;
-      prefLog.push('Sensory preferences score: 30');
-    }
-
-    prefLog.push(`Total preference score: ${prefScore}`);
-    return { prefScore, prefLog };
+    return conflicts;
   }
 }

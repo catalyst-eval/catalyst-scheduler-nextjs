@@ -1,13 +1,13 @@
 // src/lib/intakeq/appointment-sync.ts
 
 import type { 
-    IntakeQAppointment, 
-    IntakeQWebhookPayload 
+  IntakeQAppointment, 
+  IntakeQWebhookPayload 
 } from '@/types/webhooks';
 import type { GoogleSheetsService } from '@/lib/google/sheets';
 import type { 
-    SchedulingRequest,
-    AppointmentRecord
+  SchedulingRequest,
+  AppointmentRecord
 } from '../../types/scheduling';
 import type { ClientPreference } from '@/types/sheets';
 import { AuditEventType } from '@/lib/google/sheets';
@@ -104,7 +104,7 @@ import { RecipientManagementService } from '@/lib/email/recipients';
     ): Promise<AppointmentProcessingResult> {
       try {
         // Convert to scheduling request format
-        const request = this.convertToSchedulingRequest(appointment);
+        const request = await this.convertToSchedulingRequest(appointment);
 
         // Log the creation attempt
         await this.sheetsService.addAuditLog({
@@ -134,12 +134,31 @@ import { RecipientManagementService } from '@/lib/email/recipients';
         }
 
         // Create office assignment service instance
-        const assignmentService = new OfficeAssignmentService(
-          await this.sheetsService.getOffices(),
-          await this.sheetsService.getAssignmentRules(),
-          await this.getClientPreference(appointment.ClientId.toString()),
-          this.createBookingsMap(existingAppointments)
-        );
+        const [offices, rules, clinicians] = await Promise.all([
+          this.sheetsService.getOffices(),
+          this.sheetsService.getAssignmentRules(),
+          this.sheetsService.getClinicians()
+        ]);
+        
+        const clientPreference = await this.getClientPreference(appointment.ClientId.toString());
+        
+        // Use the existing appointmentDate variable
+const appointments = await this.sheetsService.getAppointments(
+  `${appointmentDate}T00:00:00Z`,
+  `${appointmentDate}T23:59:59Z`
+);
+
+const filteredAppointments = appointments.filter(
+  (appt: AppointmentRecord) => appt.appointmentId !== appointment.Id
+);
+
+const assignmentService = new OfficeAssignmentService(
+  offices,
+  rules,
+  clinicians,
+  clientPreference,
+  this.createBookingsMap(filteredAppointments)
+);
 
         // Find optimal office
         const assignmentResult = await assignmentService.findOptimalOffice(request);
@@ -231,7 +250,7 @@ import { RecipientManagementService } from '@/lib/email/recipients';
     ): Promise<AppointmentProcessingResult> {
       try {
         // Convert to scheduling request format
-        const request = this.convertToSchedulingRequest(appointment);
+        const request = await this.convertToSchedulingRequest(appointment);
   
         // Log the update attempt
         await this.sheetsService.addAuditLog({
@@ -297,15 +316,22 @@ import { RecipientManagementService } from '@/lib/email/recipients';
         ...requirements
       };  
 
-          // Create office assignment service instance
-          const assignmentService = new OfficeAssignmentService(
-            await this.sheetsService.getOffices(),
-            await this.sheetsService.getAssignmentRules(),
-            await this.getClientPreference(appointment.ClientId.toString()),
-            this.createBookingsMap(
-              newTimeAppointments.filter(appt => appt.appointmentId !== appointment.Id)
-            )
-          );
+          // Inside handleNewAppointment
+const [offices, rules, clinicians] = await Promise.all([
+  this.sheetsService.getOffices(),
+  this.sheetsService.getAssignmentRules(),
+  this.sheetsService.getClinicians()
+]);
+
+const clientPreference = await this.getClientPreference(appointment.ClientId.toString());
+
+const assignmentService = new OfficeAssignmentService(
+  offices,
+  rules,
+  clinicians,
+  clientPreference,
+  this.createBookingsMap(existingAppointments)
+);
 
           // Find optimal office for new time
           const assignmentResult = await assignmentService.findOptimalOffice(request);
@@ -415,7 +441,8 @@ import { RecipientManagementService } from '@/lib/email/recipients';
         };
 
         // Process individual instance
-        const result = await this.handleNewAppointment(appointmentInstance);
+        const request = await this.convertToSchedulingRequest(appointmentInstance);
+  const result = await this.handleNewAppointment(appointmentInstance);
         if (!result.success) {
           throw new Error(
             `Failed to schedule occurrence ${occurrenceCount + 1}: ${result.error}`
@@ -508,24 +535,59 @@ private async handleAppointmentCancellation(
   }
 
     /**
-     * Convert IntakeQ appointment to internal scheduling request format
-     */
-    private convertToSchedulingRequest(
-      appointment: IntakeQAppointment
-    ): SchedulingRequest {
+   * Convert IntakeQ appointment to internal scheduling request format
+   */
+  private async convertToSchedulingRequest(
+    appointment: IntakeQAppointment
+  ): Promise<SchedulingRequest> {
+    try {
+      // Find clinician by IntakeQ ID
+      const clinicians = await this.sheetsService.getClinicians();
+      const clinician = clinicians.find(c => 
+        c.intakeQPractitionerId === appointment.PractitionerId
+      );
+
+      if (!clinician) {
+        throw new Error(`No clinician found for IntakeQ ID: ${appointment.PractitionerId}`);
+      }
+
+      // Get client preferences to determine requirements
+      const clientPrefs = await this.getClientPreference(appointment.ClientId.toString());
+      
+      // Set base requirements from client preferences
+      const mobilityNeeds = clientPrefs?.mobilityNeeds || [];
+      const sensoryPrefs = clientPrefs?.sensoryPreferences || [];
+      const physicalNeeds = clientPrefs?.physicalNeeds || [];
+
+      const requirements = {
+        accessibility: Array.isArray(mobilityNeeds) && mobilityNeeds.length > 0,
+        specialFeatures: [
+          ...(Array.isArray(sensoryPrefs) ? sensoryPrefs : []),
+          ...(Array.isArray(physicalNeeds) ? physicalNeeds : [])
+        ],
+        roomPreference: clientPrefs?.assignedOffice || undefined
+      };
+
       return {
         clientId: appointment.ClientId.toString(),
-        clinicianId: appointment.PractitionerId,
+        clinicianId: clinician.clinicianId, // Use our internal ID (e.g., 'T1' for Tyler)
         dateTime: appointment.StartDateIso,
         duration: appointment.Duration,
         sessionType: this.determineSessionType(appointment),
-        requirements: {
-          // These would need to be determined from client preferences
-          accessibility: false,
-          specialFeatures: []
-        }
+        requirements
       };
+    } catch (error) {
+      // Log conversion error
+      await this.sheetsService.addAuditLog({
+        timestamp: new Date().toISOString(),
+        eventType: AuditEventType.SYSTEM_ERROR,
+        description: `Error converting IntakeQ appointment ${appointment.Id}`,
+        user: 'SYSTEM',
+        systemNotes: error instanceof Error ? error.message : 'Unknown error'
+      });
+      throw error;
     }
+  }
   
     /**
  * Determine session type from IntakeQ service data
