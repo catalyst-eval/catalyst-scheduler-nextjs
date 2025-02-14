@@ -1,6 +1,6 @@
 // src/lib/intakeq/webhook-handler.ts
 
-import type { IntakeQWebhookPayload } from '@/types/webhooks';
+import type { IntakeQWebhookPayload, WebhookEventType } from '@/types/webhooks';
 import type { GoogleSheetsService } from '@/lib/google/sheets';
 import { AppointmentSyncHandler } from './appointment-sync';
 import { AuditEventType } from '@/lib/google/sheets';
@@ -20,6 +20,14 @@ export class EnhancedWebhookHandler {
     private readonly sheetsService: GoogleSheetsService,
     private readonly appointmentSync: AppointmentSyncHandler
   ) {}
+
+  /**
+   * Get event type from payload, handling both field names
+   */
+  private getEventType(payload: IntakeQWebhookPayload): WebhookEventType {
+    // Use EventType if available, fall back to Type
+    return payload.EventType || payload.Type;
+  }
 
   /**
    * Process incoming webhook with validation and retries
@@ -82,9 +90,12 @@ export class EnhancedWebhookHandler {
 
     const typedPayload = payload as Partial<IntakeQWebhookPayload>;
 
-    // Required fields validation
-    if (!typedPayload.Type || !typedPayload.ClientId) {
-      return { isValid: false, error: 'Missing required fields' };
+    // Required fields validation - check both Type and EventType
+    if (!typedPayload.Type && !typedPayload.EventType) {
+      return { isValid: false, error: 'Missing event type field' };
+    }
+    if (!typedPayload.ClientId) {
+      return { isValid: false, error: 'Missing ClientId field' };
     }
 
     // Type-specific validation
@@ -119,7 +130,8 @@ export class EnhancedWebhookHandler {
     try {
       let result: WebhookProcessingResult;
 
-      switch (payload.Type) {
+      const eventType = this.getEventType(payload);
+      switch (eventType) {
         case 'Appointment Created':
         case 'Appointment Updated':
           result = await this.appointmentSync.processAppointmentEvent(payload);

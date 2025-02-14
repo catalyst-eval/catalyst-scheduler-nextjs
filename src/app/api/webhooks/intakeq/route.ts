@@ -6,29 +6,30 @@ import { AppointmentSyncHandler } from '@/lib/intakeq/appointment-sync';
 import { processAccessibilityForm } from '@/lib/intakeq/accessibility-form';
 import type { IntakeQWebhookPayload, WebhookResponse } from '@/types/webhooks';
 
-export async function GET() {
-  return NextResponse.json({
-    status: 'ok',
-    message: 'IntakeQ webhook endpoint active',
-    timestamp: new Date().toISOString()
-  });
-}
-
-export async function POST(
-  request: Request
-): Promise<NextResponse<WebhookResponse>> {
+export async function POST(request: Request): Promise<NextResponse<WebhookResponse>> {
   try {
     // Parse and validate payload
     const rawBody = await request.text();
+    console.log('Debug - Raw webhook payload:', rawBody);
+    
     let payload: IntakeQWebhookPayload;
     
     try {
       payload = JSON.parse(rawBody);
+      console.log('Debug - Parsed payload:', payload);
     } catch (e) {
+      console.error('Debug - JSON parse error:', e);
       throw new Error('Invalid JSON payload');
     }
 
-    if (!payload.Type || !payload.ClientId) {
+    // Log specific fields we're looking for
+    console.log('Debug - Type field:', payload.Type);
+    console.log('Debug - ClientId field:', payload.ClientId);
+    console.log('Debug - All top-level keys:', Object.keys(payload));
+
+    const eventType = payload.Type || payload.EventType;
+    if (!eventType || !payload.ClientId) {
+      console.log('Debug - Missing fields. EventType:', eventType, 'ClientId:', payload.ClientId);
       throw new Error('Missing required fields');
     }
 

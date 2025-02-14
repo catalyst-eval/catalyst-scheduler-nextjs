@@ -25,7 +25,129 @@ import { RecipientManagementService } from '@/lib/email/recipients';
   }
   
   export class AppointmentSyncHandler {
-    constructor(private readonly sheetsService: GoogleSheetsService) {}
+    constructor(private readonly sheetsService: GoogleSheetsService) {
+      // Debug environment variables on initialization
+      console.log('Debug - Constructor Environment:', {
+        hasIntakeQKey: !!process.env.INTAKEQ_API_KEY,
+        envKeys: Object.keys(process.env).filter(key => key.startsWith('INTAKEQ')),
+        nodeEnv: process.env.NODE_ENV
+      });
+    }
+
+  /**
+ * Fetch appointments from IntakeQ API for a specific date
+ */
+  async fetchIntakeQAppointments(date: string): Promise<IntakeQAppointment[]> {
+    try {
+      const startDate = new Date(date);
+      startDate.setHours(0, 0, 0, 0);
+      const endDate = new Date(date);
+      endDate.setHours(23, 59, 59, 999);
+  
+      // Log fetch attempt
+      await this.sheetsService.addAuditLog({
+        timestamp: new Date().toISOString(),
+        eventType: AuditEventType.WEBHOOK_RECEIVED,
+        description: `Fetching IntakeQ appointments for ${date}`,
+        user: 'SYSTEM'
+      });
+  
+      // Build URL with proper encoding
+      const params = new URLSearchParams({
+        status: 'scheduled',
+        startDate: startDate.toISOString(),
+        endDate: endDate.toISOString()
+      });
+  
+      const apiUrl = `https://intakeq.com/api/v1/appointments?${params.toString()}`;
+    console.log('Debug - IntakeQ API URL:', apiUrl);
+
+    // Get API key from environment
+    const apiKey = process.env.INTAKEQ_API_KEY;
+    console.log('Debug - Raw API Key:', process.env.INTAKEQ_API_KEY);
+    console.log('Debug - All INTAKEQ env vars:', 
+      Object.keys(process.env)
+        .filter(key => key.startsWith('INTAKEQ'))
+        .reduce((obj, key) => ({
+          ...obj,
+          [key]: process.env[key] ? 'set' : 'not set'
+        }), {})
+    );
+    console.log('Debug - Environment check:', {
+  hasKey: !!apiKey,
+  keyLength: apiKey?.length,
+  env: process.env.NODE_ENV
+});
+
+if (!apiKey) {
+  throw new Error('IntakeQ API key not configured');
+}
+    console.log('Debug - ENV variables:', {
+      hasApiKey: !!process.env.INTAKEQ_API_KEY,
+      apiKeyLength: process.env.INTAKEQ_API_KEY?.length,
+      apiKeyStart: process.env.INTAKEQ_API_KEY?.substring(0, 4) + '...'
+    });
+
+    // Fetch appointments
+console.log('Debug - Making IntakeQ API request with headers:', {
+  url: apiUrl,
+  headers: {
+    'X-Auth-Key': apiKey,
+    'Accept': 'application/json'
+  }
+});
+
+const response = await fetch(apiUrl, {
+  method: 'GET',
+  headers: {
+    'X-Auth-Key': apiKey,
+    'Accept': 'application/json'
+  }
+});
+
+    console.log('Debug - API Response Status:', response.status);
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Debug - API Error Response:', errorText);
+      throw new Error(`IntakeQ API error: ${response.status} ${response.statusText} - ${errorText}`);
+    }
+
+    const apiResponse = await response.json();
+    console.log('Debug - Received appointments:', {
+      count: apiResponse.length,
+      firstAppointment: apiResponse[0] ? {
+        id: apiResponse[0].Id,
+        startDate: apiResponse[0].StartDateIso
+      } : null
+    });
+
+    // Log success
+    await this.sheetsService.addAuditLog({
+      timestamp: new Date().toISOString(),
+      eventType: AuditEventType.WEBHOOK_RECEIVED,
+      description: `Successfully fetched ${apiResponse.length} appointments`,
+      user: 'SYSTEM',
+      systemNotes: JSON.stringify({
+        date,
+        count: apiResponse.length
+      })
+    });
+
+    return apiResponse;
+
+  } catch (error) {
+    // Log error
+    await this.sheetsService.addAuditLog({
+      timestamp: new Date().toISOString(),
+      eventType: AuditEventType.SYSTEM_ERROR,
+      description: `Failed to fetch IntakeQ appointments for ${date}`,
+      user: 'SYSTEM',
+      systemNotes: error instanceof Error ? error.message : 'Unknown error'
+    });
+
+    throw error;
+  }
+}
   
     /**
      * Process appointment webhook events
