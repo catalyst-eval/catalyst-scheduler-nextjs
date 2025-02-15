@@ -232,6 +232,89 @@ async getClientPreferences(): Promise<ClientPreference[]> {
     }
   }
 
+  async getRecentAuditLogs(limit: number = 5): Promise<AuditLogEntry[]> {
+    try {
+      const values = await this.readSheet('Audit Log!A2:G');
+      
+      if (!values) return [];
+      
+      return values
+        .map(row => ({
+          timestamp: row[0],
+          eventType: row[1],
+          description: row[2],
+          user: row[3],
+          previousValue: row[4] || undefined,
+          newValue: row[5] || undefined,
+          systemNotes: row[6] || undefined
+        }))
+        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+        .slice(0, limit);
+        
+    } catch (error) {
+      console.error('Error reading audit logs:', error);
+      return [];
+    }
+  }
+
+  /**
+ * Get all appointments for a specific office on a given date
+ */
+async getOfficeAppointments(officeId: string, date: string): Promise<AppointmentRecord[]> {
+  const startOfDay = new Date(date);
+  startOfDay.setHours(0, 0, 0, 0);
+  
+  const endOfDay = new Date(date);
+  endOfDay.setHours(23, 59, 59, 999);
+
+  const appointments = await this.getAppointments(
+    startOfDay.toISOString(),
+    endOfDay.toISOString()
+  );
+
+  if (officeId === 'all') {
+    return appointments;
+  }
+
+  return appointments.filter(appt => appt.officeId === officeId);
+}
+
+/**
+ * Get all appointments for a date range
+ */
+async getAppointments(startDate: string, endDate: string): Promise<AppointmentRecord[]> {
+  try {
+    const values = await this.readSheet('Appointments!A2:N');
+    
+    if (!values) return [];
+
+    return values
+      .map(row => ({
+        appointmentId: row[0],
+        clientId: row[1],
+        clinicianId: row[2],
+        officeId: row[3],
+        sessionType: row[4] as 'in-person' | 'telehealth' | 'group' | 'family',
+        startTime: row[5],
+        endTime: row[6],
+        status: row[7] as 'scheduled' | 'completed' | 'cancelled' | 'rescheduled',
+        lastUpdated: row[8],
+        source: row[9] as 'intakeq' | 'manual',
+        requirements: JSON.parse(row[10] || '{}'),
+        notes: row[11] || undefined
+      }))
+      .filter(appt => {
+        const apptDate = new Date(appt.startTime);
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+        return apptDate >= start && apptDate <= end;
+      });
+  } catch (error) {
+    console.error('Error reading appointments:', error);
+    throw new Error('Failed to read appointments');
+  }
+}
+
   // Update methods
   async updateClientPreference(preference: ClientPreference): Promise<void> {
     try {

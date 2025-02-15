@@ -1,9 +1,13 @@
 // src/lib/scheduling/daily-assignment-service.ts
 
 import type { 
-    AppointmentRecord,
-    SchedulingConflict 
-  } from '@/types/scheduling';
+  AppointmentRecord,
+  SchedulingConflict 
+} from '@/types/scheduling';
+import { transformIntakeQAppointment } from '@/lib/transformations/appointment-types';
+import type { IntakeQService } from '@/lib/intakeq/service';
+
+
   import type { 
     SheetOffice,
     SheetClinician,
@@ -35,7 +39,8 @@ import type {
   
   export class DailyAssignmentService {
     constructor(
-      private readonly sheetsService: GoogleSheetsService
+      private readonly sheetsService: GoogleSheetsService,
+      private readonly intakeQService: IntakeQService
     ) {}
   
     /**
@@ -43,13 +48,23 @@ import type {
      */
     async generateDailySummary(date: string): Promise<DailyScheduleSummary> {
       try {
+        // Get date range for today
+        const startOfDay = `${date}T00:00:00Z`;
+        const endOfDay = `${date}T23:59:59Z`;
+    
         // Fetch all required data
-        const [appointments, offices, clinicians, clientPreferences] = await Promise.all([
-          this.sheetsService.getOfficeAppointments('all', date),
+        console.log('Fetching IntakeQ appointments for:', date);
+        const [rawAppointments, offices, clinicians, clientPreferences] = await Promise.all([
+          this.intakeQService.getAppointments(startOfDay, endOfDay),
           this.sheetsService.getOffices(),
           this.sheetsService.getClinicians(),
           this.sheetsService.getClientPreferences()
         ]);
+    
+        // Transform IntakeQ appointments
+        console.log('Found raw appointments:', rawAppointments.length);
+        const appointments = rawAppointments.map(appt => transformIntakeQAppointment(appt));
+        console.log('Transformed appointments:', appointments.length);
   
         // Initialize summary structure
         const summary: DailyScheduleSummary = {

@@ -1,12 +1,12 @@
+// src/lib/intakeq/service.ts
+
 import crypto from 'crypto';
-import type { IntakeQAppointment, IntakeQWebhookPayload } from '@/types/webhooks';
+import type { IntakeQAppointment } from '@/types/webhooks';
 import { GoogleSheetsService, AuditEventType } from '@/lib/google/sheets';
-import { AppointmentCache } from '../cache/appointments';
 
 export class IntakeQService {
   private readonly baseUrl: string;
   private readonly headers: HeadersInit;
-  private readonly cache: AppointmentCache;
 
   constructor(
     private readonly apiKey: string,
@@ -19,112 +19,104 @@ export class IntakeQService {
       'Accept': 'application/json',
       'Content-Type': 'application/json'
     };
-    this.cache = new AppointmentCache();
+    
+    // Log initialization
+    console.log('IntakeQ Service initialized:', {
+      hasApiKey: !!apiKey,
+      baseUrl,
+      headers: Object.keys(this.headers)
+    });
   }
 
   async getAppointments(startDate: string, endDate: string): Promise<IntakeQAppointment[]> {
     try {
-      // Try cache first
-      const cacheKey = `appointments:${startDate}:${endDate}`;
-      const cached = await this.cache.get<IntakeQAppointment[]>(cacheKey);
-      if (cached) {
-        return cached;
-      }
-  
+      console.log('Fetching IntakeQ appointments:', { startDate, endDate });
+
       // Format dates properly for IntakeQ
-      const formattedStartDate = new Date(startDate).toISOString();
-      const formattedEndDate = new Date(endDate).toISOString();
-  
       const params = new URLSearchParams({
-        startDate: formattedStartDate,
-        endDate: formattedEndDate,
+        startDate: new Date(startDate).toISOString(),
+        endDate: new Date(endDate).toISOString(),
         status: 'scheduled,confirmed'
       });
-  
-      const response = await fetch(`${this.baseUrl}/appointments?${params}`, {
+
+      const url = `${this.baseUrl}/appointments?${params}`;
+      console.log('IntakeQ API Request:', {
+        url,
+        method: 'GET',
+        headers: Object.keys(this.headers)
+      });
+
+      const response = await fetch(url, {
         method: 'GET',
         headers: this.headers
       });
-  
+
+      console.log('IntakeQ API Response:', {
+        status: response.status,
+        statusText: response.statusText,
+        headers: Object.fromEntries(response.headers.entries())
+      });
+
       if (!response.ok) {
-        throw new Error(`IntakeQ API error: ${response.status}`);
+        const errorText = await response.text();
+        console.error('IntakeQ API Error Response:', {
+          status: response.status,
+          body: errorText
+        });
+        throw new Error(`IntakeQ API error: ${response.status} - ${errorText}`);
       }
-  
-      const appointments = await response.json() as IntakeQAppointment[];
-  
-      // Cache the results
-      await this.cache.set(cacheKey, appointments);
-  
+
+      const appointments = await response.json();
+      console.log('IntakeQ Appointments Retrieved:', {
+        count: appointments.length,
+        sampleAppointment: appointments[0] ? {
+          id: appointments[0].Id,
+          startTime: appointments[0].StartDateIso,
+          type: appointments[0].ServiceName
+        } : null
+      });
+
       return appointments;
     } catch (error) {
+      console.error('Error fetching IntakeQ appointments:', error);
       await this.sheetsService.addAuditLog({
         timestamp: new Date().toISOString(),
         eventType: AuditEventType.SYSTEM_ERROR,
         description: 'Failed to fetch IntakeQ appointments',
         user: 'SYSTEM',
-        systemNotes: error instanceof Error ? error.message : 'Unknown error'
+        systemNotes: error instanceof Error ? 
+          `${error.message}\n${error.stack}` : 
+          'Unknown error'
       });
       return []; // Return empty array instead of throwing
     }
   }
-  
-  async getAppointment(appointmentId: string): Promise<IntakeQAppointment | null> {
+
+  async validateWebhookSignature(payload: string, signature: string): Promise<boolean> {
     try {
-      // Try cache first
-      const cacheKey = `appointment:${appointmentId}`;
-      const cached = await this.cache.get<IntakeQAppointment>(cacheKey);
-      if (cached) {
-        return cached;
+      const secret = process.env.INTAKEQ_WEBHOOK_SECRET;
+      if (!secret) {
+        throw new Error('Webhook secret not configured');
       }
-  
-      const response = await fetch(`${this.baseUrl}/appointments/${appointmentId}`, {
-        method: 'GET',
-        headers: this.headers
-      });
-  
-      if (!response.ok) {
-        throw new Error(`IntakeQ API error: ${response.status}`);
-      }
-  
-      const appointment = await response.json() as IntakeQAppointment;
-  
-      // Cache the result
-      await this.cache.set(cacheKey, appointment);
-  
-      return appointment;
+
+      const hmac = crypto.createHmac('sha256', secret);
+      const calculatedSignature = hmac.update(payload).digest('hex');
+      
+      return crypto.timingSafeEqual(
+        Buffer.from(signature),
+        Buffer.from(calculatedSignature)
+      );
     } catch (error) {
+      console.error('Error validating webhook signature:', error);
       await this.sheetsService.addAuditLog({
         timestamp: new Date().toISOString(),
         eventType: AuditEventType.SYSTEM_ERROR,
-        description: `Failed to fetch appointment ${appointmentId}`,
+        description: 'Webhook signature validation failed',
         user: 'SYSTEM',
         systemNotes: error instanceof Error ? error.message : 'Unknown error'
       });
-      return null; // Return null instead of throwing
+      return false;
     }
-  }
-
-  async validateWebhookSignature(payload: string, signature: string): Promise<boolean> {
-    const secret = process.env.INTAKEQ_WEBHOOK_SECRET;
-    if (!secret) {
-      throw new Error('Webhook secret not configured');
-    }
-
-    const hmac = crypto.createHmac('sha256', secret);
-    const calculatedSignature = hmac.update(payload).digest('hex');
-    return crypto.timingSafeEqual(
-      Buffer.from(signature),
-      Buffer.from(calculatedSignature)
-    );
-  }
-
-  async getClinicianAppointments(
-    clinicianId: string,
-    startDate: string,
-    endDate: string
-  ): Promise<IntakeQAppointment[]> {
-    const appointments = await this.getAppointments(startDate, endDate);
-    return appointments.filter(appt => appt.PractitionerId === clinicianId);
   }
 
   async testConnection(): Promise<boolean> {
@@ -132,13 +124,16 @@ export class IntakeQService {
       const response = await fetch(`${this.baseUrl}/practitioners`, {
         headers: this.headers
       });
-      return response.ok;
+      const success = response.ok;
+      console.log('IntakeQ connection test:', {
+        success,
+        status: response.status,
+        statusText: response.statusText
+      });
+      return success;
     } catch (error) {
+      console.error('IntakeQ connection test failed:', error);
       return false;
     }
-  }
-
-  invalidateCache(pattern?: string): void {
-    this.cache.invalidate(pattern);
   }
 }

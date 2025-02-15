@@ -2,104 +2,82 @@
 
 import { NextResponse } from 'next/server';
 import { initializeGoogleSheets } from '@/lib/google/auth';
+import { initializeEmailService } from '@/lib/email/config';
+import { RecipientManagementService } from '@/lib/email/recipients';
+import { IntakeQService } from '@/lib/intakeq/service';
 import { DailyAssignmentService } from '@/lib/scheduling/daily-assignment-service';
-import { EmailNotificationService } from '@/lib/notifications/email-service';
+import { EmailTemplates } from '@/lib/email/templates';
 
 export async function GET(request: Request) {
   try {
-    // Get date from query parameters
-    const { searchParams } = new URL(request.url);
-    const date = searchParams.get('date') || new Date().toISOString().split('T')[0];
-
     // Initialize services
     const sheetsService = await initializeGoogleSheets();
-    const assignmentService = new DailyAssignmentService(sheetsService);
+    const emailService = await initializeEmailService(sheetsService);
+    const intakeQService = new IntakeQService(
+      process.env.INTAKEQ_API_KEY!,
+      sheetsService
+    );
+    const recipientService = new RecipientManagementService(sheetsService);
 
-    // Generate summary
-    const summary = await assignmentService.generateDailySummary(date);
+    // Get date from query parameters or use today
+    const url = new URL(request.url);
+    const targetDate = url.searchParams.get('date') || new Date().toISOString().split('T')[0];
+    console.log('Generating assignments for:', targetDate);
 
-    return NextResponse.json({
-      success: true,
-      data: {
-        date,
-        appointments: summary.appointments,
-        conflicts: summary.conflicts,
-        alerts: summary.alerts,
-        officeUtilization: Array.from(summary.officeUtilization.entries()).map(
-          ([officeId, data]) => ({
-            officeId,
-            ...data
-          })
-        )
-      }
+    // Test IntakeQ connection
+    console.log('Testing IntakeQ connection...');
+    const connected = await intakeQService.testConnection();
+    if (!connected) {
+      console.error('Failed to connect to IntakeQ API');
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: 'Failed to connect to IntakeQ API'
+        },
+        { status: 500 }
+      );
+    }
+    console.log('IntakeQ connection successful');
+    
+    // Generate daily summary with both services
+    const dailyAssignmentService = new DailyAssignmentService(
+      sheetsService,
+      intakeQService
+    );
+    
+    console.log('Fetching daily summary...');
+    const summary = await dailyAssignmentService.generateDailySummary(targetDate);
+    console.log('Summary generated with', summary.appointments.length, 'appointments');
+
+    // Get recipients and send email
+    const recipients = await recipientService.getDailyScheduleRecipients();
+    const template = EmailTemplates.dailySchedule(summary);
+    
+    console.log('Sending email to', recipients.length, 'recipients');
+    await emailService.sendEmail(recipients, template, {
+      type: 'schedule',
+      priority: summary.alerts.some(a => a.severity === 'high') ? 'high' : 'normal',
+      retryCount: 3
     });
 
-  } catch (error) {
-    console.error('Error generating daily summary:', error);
-    return NextResponse.json(
-      {
-        success: false,
-        error: 'Failed to generate daily summary',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      },
-      { status: 500 }
-    );
-  }
-}
-
-export async function POST(request: Request) {
-  try {
-    // Initialize services
-    const sheetsService = await initializeGoogleSheets();
-    const assignmentService = new DailyAssignmentService(sheetsService);
-    const emailService = new EmailNotificationService(sheetsService);
-
-    // Get request date
-    const { date = new Date().toISOString().split('T')[0] } = await request.json();
-
-    // Generate summary
-    const summary = await assignmentService.generateDailySummary(date);
-
-    // Get recipients (in production, this would come from your user management system)
-    const recipients = [
-      {
-        email: 'admin@example.com',
-        name: 'System Admin',
-        role: 'admin' as const,
-        notificationPreferences: {
-          dailySchedule: true,
-          conflicts: true,
-          capacityAlerts: true
-        }
-      }
-    ];
-
-    // Send notifications
-    await emailService.sendDailyAssignments(summary, recipients);
-
     return NextResponse.json({
       success: true,
       data: {
-        date,
-        summary: {
-          appointmentCount: summary.appointments.length,
-          conflictCount: summary.conflicts.length,
-          alertCount: summary.alerts.length
-        },
-        notifications: {
-          recipients: recipients.length,
-          highPriorityAlerts: summary.alerts.filter(a => a.severity === 'high').length
-        }
+        date: targetDate,
+        appointmentCount: summary.appointments.length,
+        conflicts: summary.conflicts,
+        alerts: summary.alerts,
+        officeUtilization: Object.fromEntries(summary.officeUtilization),
+        recipientCount: recipients.length
       }
     });
 
   } catch (error) {
     console.error('Error processing daily assignments:', error);
     return NextResponse.json(
-      {
-        success: false,
-        error: 'Failed to process daily assignments',
-        details: error instanceof Error ? error.message : 'Unknown error'
+      { 
+        success: false, 
+        error: error instanceof Error ? error.message : 'Failed to process daily assignments'
       },
       { status: 500 }
     );
