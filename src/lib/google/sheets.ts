@@ -16,29 +16,18 @@ import type { AppointmentRecord } from '../../types/scheduling';
 import { SheetsCacheService } from './sheets-cache';
 
 export enum AuditEventType {
-  // Configuration Events
   CONFIG_UPDATED = 'CONFIG_UPDATED',
   RULE_CREATED = 'RULE_CREATED',
   RULE_UPDATED = 'RULE_UPDATED',
-  
-  // Client Events
   CLIENT_PREFERENCES_UPDATED = 'CLIENT_PREFERENCES_UPDATED',
   CLIENT_OFFICE_ASSIGNED = 'CLIENT_OFFICE_ASSIGNED',
-  
-  // Appointment Events
   APPOINTMENT_CREATED = 'APPOINTMENT_CREATED',
   APPOINTMENT_UPDATED = 'APPOINTMENT_UPDATED',
   APPOINTMENT_CANCELLED = 'APPOINTMENT_CANCELLED',
-  
-  // System Events
   SYSTEM_ERROR = 'SYSTEM_ERROR',
   WEBHOOK_RECEIVED = 'WEBHOOK_RECEIVED',
   INTEGRATION_UPDATED = 'INTEGRATION_UPDATED',
-  
-  // Daily Assignment Events
   DAILY_ASSIGNMENTS_UPDATED = 'DAILY_ASSIGNMENTS_UPDATED',
-  
-  // Error Events
   CRITICAL_ERROR = 'CRITICAL_ERROR'
 }
 
@@ -46,26 +35,6 @@ export class GoogleSheetsService {
   private sheets;
   private spreadsheetId: string;
   private cache: SheetsCacheService;
-
-  async getOffices(): Promise<SheetOffice[]> {
-    const values = await this.readSheet('Offices Configuration!A2:M');
-    
-    return values?.map(row => ({
-      officeId: row[0],
-      name: row[1],
-      unit: row[2],
-      inService: row[3] === 'TRUE',
-      floor: row[4] as 'upstairs' | 'downstairs',
-      isAccessible: row[5] === 'TRUE',
-      size: row[6] as 'small' | 'medium' | 'large',
-      ageGroups: row[7]?.split(',').map((s: string) => s.trim()) || [],
-      specialFeatures: row[8]?.split(',').map((s: string) => s.trim()) || [],
-      primaryClinician: row[9] || undefined,
-      alternativeClinicians: row[10]?.split(',').map((s: string) => s.trim()) || [],
-      isFlexSpace: row[11] === 'TRUE',
-      notes: row[12]
-    })) ?? [];
-  }
 
   constructor(credentials: any, spreadsheetId: string) {
     const client = new JWT({
@@ -79,7 +48,6 @@ export class GoogleSheetsService {
     this.cache = new SheetsCacheService();
   }
 
-  // Helper method to read a specific sheet tab
   private async readSheet(range: string) {
     const cacheKey = `sheet:${range}`;
     
@@ -109,7 +77,6 @@ export class GoogleSheetsService {
     }
   }
 
-  // Helper method to append rows to a sheet
   private async appendRows(range: string, values: any[][]) {
     try {
       await this.sheets.spreadsheets.values.append({
@@ -126,7 +93,26 @@ export class GoogleSheetsService {
     }
   }
 
-  // Clinicians Configuration
+  async getOffices(): Promise<SheetOffice[]> {
+    const values = await this.readSheet('Offices Configuration!A2:M');
+    
+    return values?.map(row => ({
+      officeId: row[0],
+      name: row[1],
+      unit: row[2],
+      inService: row[3] === 'TRUE',
+      floor: row[4] as 'upstairs' | 'downstairs',
+      isAccessible: row[5] === 'TRUE',
+      size: row[6] as 'small' | 'medium' | 'large',
+      ageGroups: row[7]?.split(',').map((s: string) => s.trim()) || [],
+      specialFeatures: row[8]?.split(',').map((s: string) => s.trim()) || [],
+      primaryClinician: row[9] || undefined,
+      alternativeClinicians: row[10]?.split(',').map((s: string) => s.trim()) || [],
+      isFlexSpace: row[11] === 'TRUE',
+      notes: row[12]
+    })) ?? [];
+  }
+
   async getClinicians(): Promise<SheetClinician[]> {
     const values = await this.readSheet('Clinicians Configuration!A2:M');
     
@@ -147,7 +133,6 @@ export class GoogleSheetsService {
     })) ?? [];
   }
 
-  // Assignment Rules
   async getAssignmentRules(): Promise<AssignmentRule[]> {
     const values = await this.readSheet('Assignment Rules!A2:H');
     
@@ -163,28 +148,26 @@ export class GoogleSheetsService {
     })) ?? [];
   }
 
-  // Update the getClientPreferences method in GoogleSheetsService
-async getClientPreferences(): Promise<ClientPreference[]> {
-  const values = await this.readSheet('Client Preferences!A2:L');
-  
-  return values?.map(row => ({
-    clientId: row[0],
-    name: row[1],
-    email: row[2],
-    mobilityNeeds: JSON.parse(row[3] || '[]'),
-    sensoryPreferences: JSON.parse(row[4] || '[]'),
-    physicalNeeds: JSON.parse(row[5] || '[]'),
-    roomConsistency: Number(row[6]),
-    supportNeeds: JSON.parse(row[7] || '[]'),
-    specialFeatures: [], // Added this required field with default empty array
-    additionalNotes: row[8],
-    lastUpdated: row[9],
-    preferredClinician: row[10],
-    assignedOffice: row[11]
-  })) ?? [];
-}
+  async getClientPreferences(): Promise<ClientPreference[]> {
+    const values = await this.readSheet('Client Preferences!A2:L');
+    
+    return values?.map(row => ({
+      clientId: row[0],
+      name: row[1],
+      email: row[2],
+      mobilityNeeds: JSON.parse(row[3] || '[]'),
+      sensoryPreferences: JSON.parse(row[4] || '[]'),
+      physicalNeeds: JSON.parse(row[5] || '[]'),
+      roomConsistency: Number(row[6]),
+      supportNeeds: JSON.parse(row[7] || '[]'),
+      specialFeatures: [], // Added required field with default empty array
+      additionalNotes: row[8],
+      lastUpdated: row[9],
+      preferredClinician: row[10],
+      assignedOffice: row[11]
+    })) ?? [];
+  }
 
-  // Schedule Configuration
   async getScheduleConfig(): Promise<ScheduleConfig[]> {
     const values = await this.readSheet('Schedule Configuration!A2:E');
     
@@ -197,7 +180,6 @@ async getClientPreferences(): Promise<ClientPreference[]> {
     })) ?? [];
   }
 
-  // Integration Settings
   async getIntegrationSettings(): Promise<IntegrationSetting[]> {
     const values = await this.readSheet('Integration Settings!A2:E');
     
@@ -210,7 +192,6 @@ async getClientPreferences(): Promise<ClientPreference[]> {
     })) ?? [];
   }
 
-  // Enhanced Audit Logging
   async addAuditLog(entry: AuditLogEntry): Promise<void> {
     try {
       const rowData = [
@@ -227,7 +208,6 @@ async getClientPreferences(): Promise<ClientPreference[]> {
       console.log('Audit log entry added:', entry);
     } catch (error) {
       console.error('Error adding audit log:', error);
-      // If audit log fails, we need to handle it gracefully
       console.error('Failed audit log entry:', entry);
     }
   }
@@ -257,65 +237,141 @@ async getClientPreferences(): Promise<ClientPreference[]> {
     }
   }
 
-  /**
- * Get all appointments for a specific office on a given date
- */
-async getOfficeAppointments(officeId: string, date: string): Promise<AppointmentRecord[]> {
-  const startOfDay = new Date(date);
-  startOfDay.setHours(0, 0, 0, 0);
-  
-  const endOfDay = new Date(date);
-  endOfDay.setHours(23, 59, 59, 999);
-
-  const appointments = await this.getAppointments(
-    startOfDay.toISOString(),
-    endOfDay.toISOString()
-  );
-
-  if (officeId === 'all') {
-    return appointments;
-  }
-
-  return appointments.filter(appt => appt.officeId === officeId);
-}
-
-/**
- * Get all appointments for a date range
- */
-async getAppointments(startDate: string, endDate: string): Promise<AppointmentRecord[]> {
-  try {
-    const values = await this.readSheet('Appointments!A2:N');
+  async getOfficeAppointments(officeId: string, date: string): Promise<AppointmentRecord[]> {
+    const startOfDay = new Date(date);
+    startOfDay.setHours(0, 0, 0, 0);
     
-    if (!values) return [];
+    const endOfDay = new Date(date);
+    endOfDay.setHours(23, 59, 59, 999);
 
-    return values
-      .map(row => ({
-        appointmentId: row[0],
-        clientId: row[1],
-        clinicianId: row[2],
-        officeId: row[3],
-        sessionType: row[4] as 'in-person' | 'telehealth' | 'group' | 'family',
-        startTime: row[5],
-        endTime: row[6],
-        status: row[7] as 'scheduled' | 'completed' | 'cancelled' | 'rescheduled',
-        lastUpdated: row[8],
-        source: row[9] as 'intakeq' | 'manual',
-        requirements: JSON.parse(row[10] || '{}'),
-        notes: row[11] || undefined
-      }))
-      .filter(appt => {
-        const apptDate = new Date(appt.startTime);
-        const start = new Date(startDate);
-        const end = new Date(endDate);
-        return apptDate >= start && apptDate <= end;
-      });
-  } catch (error) {
-    console.error('Error reading appointments:', error);
-    throw new Error('Failed to read appointments');
+    const appointments = await this.getAppointments(
+      startOfDay.toISOString(),
+      endOfDay.toISOString()
+    );
+
+    if (officeId === 'all') {
+      return appointments;
+    }
+
+    return appointments.filter(appt => appt.officeId === officeId);
   }
-}
 
-  // Update methods
+  async getAppointments(startDate: string, endDate: string): Promise<AppointmentRecord[]> {
+    try {
+      const values = await this.readSheet('Appointments!A2:N');
+      
+      if (!values) return [];
+
+      return values
+        .map(row => ({
+          appointmentId: row[0],
+          clientId: row[1],
+          clinicianId: row[2],
+          officeId: row[3],
+          sessionType: row[4] as 'in-person' | 'telehealth' | 'group' | 'family',
+          startTime: row[5],
+          endTime: row[6],
+          status: row[7] as 'scheduled' | 'completed' | 'cancelled' | 'rescheduled',
+          lastUpdated: row[8],
+          source: row[9] as 'intakeq' | 'manual',
+          requirements: JSON.parse(row[10] || '{}'),
+          notes: row[11] || undefined
+        }))
+        .filter(appt => {
+          const apptDate = new Date(appt.startTime);
+          const start = new Date(startDate);
+          const end = new Date(endDate);
+          return apptDate >= start && apptDate <= end;
+        });
+    } catch (error) {
+      console.error('Error reading appointments:', error);
+      throw new Error('Failed to read appointments');
+    }
+  }
+
+  async addAppointment(appointment: AppointmentRecord): Promise<void> {
+    try {
+      const rowData = [
+        appointment.appointmentId,
+        appointment.clientId,
+        appointment.clinicianId,
+        appointment.officeId,
+        appointment.sessionType,
+        appointment.startTime,
+        appointment.endTime,
+        appointment.status,
+        appointment.lastUpdated,
+        appointment.source,
+        JSON.stringify(appointment.requirements || {}),
+        appointment.notes || ''
+      ];
+
+      await this.appendRows('Appointments!A:L', [rowData]);
+
+      await this.addAuditLog({
+        timestamp: new Date().toISOString(),
+        eventType: AuditEventType.APPOINTMENT_CREATED,
+        description: `Added appointment ${appointment.appointmentId}`,
+        user: 'SYSTEM',
+        systemNotes: JSON.stringify(appointment)
+      });
+
+      await this.refreshCache('Appointments!A2:N');
+    } catch (error) {
+      console.error('Error adding appointment:', error);
+      throw new Error('Failed to add appointment');
+    }
+  }
+
+  async updateAppointment(appointment: AppointmentRecord): Promise<void> {
+    try {
+      const values = await this.readSheet('Appointments!A:A');
+      const appointmentRow = values?.findIndex(row => row[0] === appointment.appointmentId);
+
+      if (!values || !appointmentRow || appointmentRow < 0) {
+        throw new Error(`Appointment ${appointment.appointmentId} not found`);
+      }
+
+      const rowData = [
+        appointment.appointmentId,
+        appointment.clientId,
+        appointment.clinicianId,
+        appointment.officeId,
+        appointment.sessionType,
+        appointment.startTime,
+        appointment.endTime,
+        appointment.status,
+        appointment.lastUpdated,
+        appointment.source,
+        JSON.stringify(appointment.requirements || {}),
+        appointment.notes || ''
+      ];
+
+      await this.sheets.spreadsheets.values.update({
+        spreadsheetId: this.spreadsheetId,
+        range: `Appointments!A${appointmentRow + 1}:L${appointmentRow + 1}`,
+        valueInputOption: 'RAW',
+        requestBody: {
+          values: [rowData]
+        }
+      });
+
+      await this.addAuditLog({
+        timestamp: new Date().toISOString(),
+        eventType: AuditEventType.APPOINTMENT_UPDATED,
+        description: `Updated appointment ${appointment.appointmentId}`,
+        user: 'SYSTEM',
+        previousValue: JSON.stringify(values[appointmentRow]),
+        newValue: JSON.stringify(rowData)
+      });
+
+      await this.refreshCache('Appointments!A2:N');
+    } catch (error) {
+      console.error('Error updating appointment:', error);
+      throw new Error('Failed to update appointment');
+    }
+  }
+
   async updateClientPreference(preference: ClientPreference): Promise<void> {
     try {
       const values = await this.readSheet('Client Preferences!A:A');
@@ -337,7 +393,6 @@ async getAppointments(startDate: string, endDate: string): Promise<AppointmentRe
       ];
 
       if (clientRow && clientRow > 0) {
-        // Update existing row
         await this.sheets.spreadsheets.values.update({
           spreadsheetId: this.spreadsheetId,
           range: `Client Preferences!A${clientRow + 1}`,
@@ -347,34 +402,37 @@ async getAppointments(startDate: string, endDate: string): Promise<AppointmentRe
           }
         });
       } else {
-        // Append new row
-        await this.appendRows('Client Preferences!A:L', [rowData]);
+        await this.appendRows('Client Preferences!A:L',
+          [rowData]);
+        }
+  
+        await this.addAuditLog({
+          timestamp: new Date().toISOString(),
+          eventType: AuditEventType.CLIENT_PREFERENCES_UPDATED,
+          description: `Updated preferences for client ${preference.clientId}`,
+          user: 'SYSTEM',
+          systemNotes: JSON.stringify(preference)
+        });
+  
+        await this.refreshCache('Client Preferences!A2:L');
+  
+      } catch (error) {
+        console.error('Error updating client preference:', error);
+        throw error;
       }
-
-      await this.addAuditLog({
-        timestamp: new Date().toISOString(),
-        eventType: AuditEventType.CLIENT_PREFERENCES_UPDATED,
-        description: `Updated preferences for client ${preference.clientId}`,
-        user: 'SYSTEM',
-        systemNotes: JSON.stringify(preference)
-      });
-
-    } catch (error) {
-      console.error('Error updating client preference:', error);
-      throw error;
+    }
+  
+    /**
+     * Force refresh cache for a specific range
+     */
+    async refreshCache(range: string): Promise<void> {
+      this.cache.invalidate(`sheet:${range}`);
+    }
+  
+    /**
+     * Clear all cached data
+     */
+    clearCache(): void {
+      this.cache.clearAll();
     }
   }
-  /**
-   * Force refresh cache for a specific range
-   */
-  async refreshCache(range: string): Promise<void> {
-    this.cache.invalidate(`sheet:${range}`);
-  }
-
-  /**
-   * Clear all cached data
-   */
-  clearCache(): void {
-    this.cache.clearAll();
-  }
-}

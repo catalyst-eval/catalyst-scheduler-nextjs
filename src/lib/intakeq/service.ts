@@ -1,8 +1,8 @@
 // src/lib/intakeq/service.ts
 
-import crypto from 'crypto';
 import type { IntakeQAppointment } from '@/types/webhooks';
 import { GoogleSheetsService, AuditEventType } from '@/lib/google/sheets';
+import crypto from 'crypto';
 
 export class IntakeQService {
   private readonly baseUrl: string;
@@ -16,34 +16,40 @@ export class IntakeQService {
     this.baseUrl = baseUrl;
     this.headers = {
       'X-Auth-Key': apiKey,
-      'Accept': 'application/json',
-      'Content-Type': 'application/json'
+      'Accept': 'application/json'
     };
-    
-    // Log initialization
-    console.log('IntakeQ Service initialized:', {
-      hasApiKey: !!apiKey,
-      baseUrl,
-      headers: Object.keys(this.headers)
-    });
   }
 
   async getAppointments(startDate: string, endDate: string): Promise<IntakeQAppointment[]> {
     try {
-      console.log('Fetching IntakeQ appointments:', { startDate, endDate });
+      // Use direct date manipulation to match IntakeQ's format
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
 
-      // Format dates properly for IntakeQ
+      // Apply timezone offset
+      const startOffset = start.getTimezoneOffset() * 60 * 1000;
+      const endOffset = end.getTimezoneOffset() * 60 * 1000;
+
+      // Get timestamps in milliseconds
+      const startTimestamp = start.getTime() - startOffset;
+      const endTimestamp = end.getTime() - endOffset;
+
       const params = new URLSearchParams({
-        startDate: new Date(startDate).toISOString(),
-        endDate: new Date(endDate).toISOString(),
-        status: 'scheduled,confirmed'
+        StartDate: startTimestamp.toString(),
+        EndDate: endTimestamp.toString(),
+        Status: 'Confirmed,WaitingConfirmation'
       });
 
       const url = `${this.baseUrl}/appointments?${params}`;
-      console.log('IntakeQ API Request:', {
-        url,
-        method: 'GET',
-        headers: Object.keys(this.headers)
+
+      console.log('IntakeQ Request:', {
+        endpoint: '/appointments',
+        startDate,
+        endDate,
+        params: Object.fromEntries(params),
+        startTimestamp,
+        endTimestamp
       });
 
       const response = await fetch(url, {
@@ -51,44 +57,38 @@ export class IntakeQService {
         headers: this.headers
       });
 
-      console.log('IntakeQ API Response:', {
-        status: response.status,
-        statusText: response.statusText,
-        headers: Object.fromEntries(response.headers.entries())
-      });
+      const text = await response.text();
+      console.log('Raw IntakeQ Response:', text.substring(0, 500) + '...');
 
       if (!response.ok) {
-        const errorText = await response.text();
-        console.error('IntakeQ API Error Response:', {
-          status: response.status,
-          body: errorText
-        });
-        throw new Error(`IntakeQ API error: ${response.status} - ${errorText}`);
+        throw new Error(`IntakeQ API error (${response.status}): ${text}`);
       }
 
-      const appointments = await response.json();
-      console.log('IntakeQ Appointments Retrieved:', {
-        count: appointments.length,
-        sampleAppointment: appointments[0] ? {
-          id: appointments[0].Id,
-          startTime: appointments[0].StartDateIso,
-          type: appointments[0].ServiceName
+      const data = JSON.parse(text);
+
+      console.log('IntakeQ Response:', {
+        status: response.status,
+        appointmentCount: Array.isArray(data) ? data.length : 'Invalid response',
+        sampleAppointment: Array.isArray(data) && data.length > 0 ? {
+          id: data[0].Id,
+          status: data[0].Status,
+          startDate: data[0].StartDateIso
         } : null
       });
 
-      return appointments;
+      return Array.isArray(data) ? data : [];
     } catch (error) {
-      console.error('Error fetching IntakeQ appointments:', error);
+      console.error('IntakeQ API Error:', error instanceof Error ? error.message : 'Unknown error');
+      
       await this.sheetsService.addAuditLog({
         timestamp: new Date().toISOString(),
         eventType: AuditEventType.SYSTEM_ERROR,
-        description: 'Failed to fetch IntakeQ appointments',
+        description: 'IntakeQ API error',
         user: 'SYSTEM',
-        systemNotes: error instanceof Error ? 
-          `${error.message}\n${error.stack}` : 
-          'Unknown error'
+        systemNotes: error instanceof Error ? error.message : 'Unknown error'
       });
-      return []; // Return empty array instead of throwing
+      
+      return [];
     }
   }
 
@@ -96,25 +96,28 @@ export class IntakeQService {
     try {
       const secret = process.env.INTAKEQ_WEBHOOK_SECRET;
       if (!secret) {
-        throw new Error('Webhook secret not configured');
+        console.error('Missing INTAKEQ_WEBHOOK_SECRET environment variable');
+        return false;
       }
 
-      const hmac = crypto.createHmac('sha256', secret);
-      const calculatedSignature = hmac.update(payload).digest('hex');
-      
-      return crypto.timingSafeEqual(
-        Buffer.from(signature),
-        Buffer.from(calculatedSignature)
-      );
-    } catch (error) {
-      console.error('Error validating webhook signature:', error);
-      await this.sheetsService.addAuditLog({
-        timestamp: new Date().toISOString(),
-        eventType: AuditEventType.SYSTEM_ERROR,
-        description: 'Webhook signature validation failed',
-        user: 'SYSTEM',
-        systemNotes: error instanceof Error ? error.message : 'Unknown error'
+      // Remove any quotes from the secret
+      const cleanSecret = secret.replace(/['"]/g, '');
+
+      // Create HMAC
+      const hmac = crypto.createHmac('sha256', cleanSecret);
+      hmac.update(payload);
+      const calculatedSignature = hmac.digest('hex');
+
+      console.log('Webhook Signature Validation:', {
+        signatureMatches: calculatedSignature === signature,
+        calculatedLength: calculatedSignature.length,
+        providedLength: signature.length,
+        payloadLength: payload.length,
       });
+
+      return calculatedSignature === signature;
+    } catch (error) {
+      console.error('Webhook signature validation error:', error);
       return false;
     }
   }
@@ -124,15 +127,15 @@ export class IntakeQService {
       const response = await fetch(`${this.baseUrl}/practitioners`, {
         headers: this.headers
       });
-      const success = response.ok;
-      console.log('IntakeQ connection test:', {
-        success,
+
+      console.log('IntakeQ Connection Test:', {
         status: response.status,
-        statusText: response.statusText
+        ok: response.ok
       });
-      return success;
+
+      return response.ok;
     } catch (error) {
-      console.error('IntakeQ connection test failed:', error);
+      console.error('IntakeQ connection test failed:', error instanceof Error ? error.message : 'Unknown error');
       return false;
     }
   }
