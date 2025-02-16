@@ -24,6 +24,7 @@ export enum AuditEventType {
   APPOINTMENT_CREATED = 'APPOINTMENT_CREATED',
   APPOINTMENT_UPDATED = 'APPOINTMENT_UPDATED',
   APPOINTMENT_CANCELLED = 'APPOINTMENT_CANCELLED',
+  APPOINTMENT_DELETED = 'APPOINTMENT_DELETED',
   SYSTEM_ERROR = 'SYSTEM_ERROR',
   WEBHOOK_RECEIVED = 'WEBHOOK_RECEIVED',
   INTEGRATION_UPDATED = 'INTEGRATION_UPDATED',
@@ -218,6 +219,11 @@ export class GoogleSheetsService {
       
       if (!values) return [];
       
+      if (!values || !Array.isArray(values)) {
+        console.log('No appointments found in sheet');
+        return [];
+      }
+      
       return values
         .map(row => ({
           timestamp: row[0],
@@ -256,45 +262,14 @@ export class GoogleSheetsService {
     return appointments.filter(appt => appt.officeId === officeId);
   }
 
-  async getAppointments(startDate: string, endDate: string): Promise<AppointmentRecord[]> {
-    try {
-      const values = await this.readSheet('Appointments!A2:N');
-      
-      if (!values) return [];
-
-      return values
-        .map(row => ({
-          appointmentId: row[0],
-          clientId: row[1],
-          clinicianId: row[2],
-          officeId: row[3],
-          sessionType: row[4] as 'in-person' | 'telehealth' | 'group' | 'family',
-          startTime: row[5],
-          endTime: row[6],
-          status: row[7] as 'scheduled' | 'completed' | 'cancelled' | 'rescheduled',
-          lastUpdated: row[8],
-          source: row[9] as 'intakeq' | 'manual',
-          requirements: JSON.parse(row[10] || '{}'),
-          notes: row[11] || undefined
-        }))
-        .filter(appt => {
-          const apptDate = new Date(appt.startTime);
-          const start = new Date(startDate);
-          const end = new Date(endDate);
-          return apptDate >= start && apptDate <= end;
-        });
-    } catch (error) {
-      console.error('Error reading appointments:', error);
-      throw new Error('Failed to read appointments');
-    }
-  }
-
   async addAppointment(appointment: AppointmentRecord): Promise<void> {
     try {
       const rowData = [
         appointment.appointmentId,
         appointment.clientId,
+        appointment.clientName,
         appointment.clinicianId,
+        appointment.clinicianName,
         appointment.officeId,
         appointment.sessionType,
         appointment.startTime,
@@ -305,9 +280,9 @@ export class GoogleSheetsService {
         JSON.stringify(appointment.requirements || {}),
         appointment.notes || ''
       ];
-
-      await this.appendRows('Appointments!A:L', [rowData]);
-
+  
+      await this.appendRows('Appointments!A:N', [rowData]);
+  
       await this.addAuditLog({
         timestamp: new Date().toISOString(),
         eventType: AuditEventType.APPOINTMENT_CREATED,
@@ -315,11 +290,81 @@ export class GoogleSheetsService {
         user: 'SYSTEM',
         systemNotes: JSON.stringify(appointment)
       });
-
+  
       await this.refreshCache('Appointments!A2:N');
     } catch (error) {
       console.error('Error adding appointment:', error);
       throw new Error('Failed to add appointment');
+    }
+  }
+
+  async getAppointments(startDate: string, endDate: string): Promise<AppointmentRecord[]> {
+    try {
+      const values = await this.readSheet('Appointments!A2:N');
+      
+      if (!values || !Array.isArray(values)) {
+        console.log('No appointments found in sheet');
+        return [];
+      }
+  
+      const mappedAppointments: AppointmentRecord[] = values
+        .map(row => {
+          try {
+            const appointment: AppointmentRecord = {
+              appointmentId: row[0] || '',
+              clientId: row[1] || '',
+              clientName: row[1] || '', // Temporary placeholder for client name
+              clinicianId: row[2] || '',
+              clinicianName: row[2] || '', // Temporary placeholder for clinician name
+              officeId: row[3] || '',
+              sessionType: (row[4] || 'in-person') as 'in-person' | 'telehealth' | 'group' | 'family',
+              startTime: row[5] || '',
+              endTime: row[6] || '',
+              status: (row[7] || 'scheduled') as 'scheduled' | 'completed' | 'cancelled' | 'rescheduled',
+              lastUpdated: row[8] || new Date().toISOString(),
+              source: (row[9] || 'manual') as 'intakeq' | 'manual'
+            };
+  
+            if (row[10]) {
+              appointment.requirements = JSON.parse(row[10]);
+            }
+  
+            if (row[11]) {
+              appointment.notes = row[11];
+            }
+  
+            return appointment;
+          } catch (error) {
+            console.error('Error mapping appointment row:', error, { row });
+            return null;
+          }
+        })
+        .filter((appt): appt is AppointmentRecord => appt !== null)
+        .filter(appt => {
+          try {
+            // Get dates without time components for comparison
+            const apptDate = new Date(appt.startTime).toISOString().split('T')[0];
+            const targetDate = new Date(startDate).toISOString().split('T')[0];
+            
+            console.log('Filtering appointment:', {
+              id: appt.appointmentId,
+              apptDate,
+              targetDate,
+              startTime: appt.startTime,
+              match: apptDate === targetDate
+            });
+            
+            return apptDate === targetDate;
+          } catch (error) {
+            console.error('Error filtering appointment:', error, { appt });
+            return false;
+          }
+        });
+  
+      return mappedAppointments;
+    } catch (error) {
+      console.error('Error reading appointments:', error);
+      throw new Error('Failed to read appointments');
     }
   }
 
@@ -371,6 +416,59 @@ export class GoogleSheetsService {
       throw new Error('Failed to update appointment');
     }
   }
+
+  // Add after the updateAppointment method:
+  async getAppointment(appointmentId: string): Promise<AppointmentRecord | null> {
+    try {
+      const values = await this.readSheet('Appointments!A2:N');
+      if (!values) return null;
+  
+      const appointmentRow = values.find(row => row[0] === appointmentId);
+      if (!appointmentRow) return null;
+  
+      return {
+        appointmentId: appointmentRow[0],
+        clientId: appointmentRow[1],
+        clientName: appointmentRow[2],
+        clinicianId: appointmentRow[3],
+        clinicianName: appointmentRow[4],
+        officeId: appointmentRow[5],
+        sessionType: appointmentRow[6] as 'in-person' | 'telehealth' | 'group' | 'family',
+        startTime: appointmentRow[7],
+        endTime: appointmentRow[8],
+        status: appointmentRow[9] as 'scheduled' | 'completed' | 'cancelled' | 'rescheduled',
+        lastUpdated: appointmentRow[10],
+        source: appointmentRow[11] as 'intakeq' | 'manual',
+        requirements: JSON.parse(appointmentRow[12] || '{}'),
+        notes: appointmentRow[13]
+      };
+    } catch (error) {
+      console.error('Error getting appointment:', error);
+      return null;
+    }
+  }
+
+
+async deleteAppointment(appointmentId: string): Promise<void> {
+  try {
+    const values = await this.readSheet('Appointments!A:A');
+    const appointmentRow = values?.findIndex(row => row[0] === appointmentId);
+
+    if (!values || !appointmentRow || appointmentRow < 0) {
+      throw new Error(`Appointment ${appointmentId} not found`);
+    }
+
+    await this.sheets.spreadsheets.values.clear({
+      spreadsheetId: this.spreadsheetId,
+      range: `Appointments!A${appointmentRow + 1}:L${appointmentRow + 1}`
+    });
+
+    await this.refreshCache('Appointments!A2:N');
+  } catch (error) {
+    console.error('Error deleting appointment:', error);
+    throw new Error('Failed to delete appointment');
+  }
+}
 
   async updateClientPreference(preference: ClientPreference): Promise<void> {
     try {

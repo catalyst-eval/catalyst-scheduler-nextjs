@@ -22,22 +22,32 @@ export class IntakeQService {
 
   async getAppointments(startDate: string, endDate: string): Promise<IntakeQAppointment[]> {
     try {
-      // Use direct date manipulation to match IntakeQ's format
-      const start = new Date(startDate);
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
+      // Convert to local timezone dates
+      const localStart = new Date(startDate);
+localStart.setUTCHours(0, 0, 0, 0);
+const localEnd = new Date(endDate);
+localEnd.setUTCHours(23, 59, 59, 999);
 
-      // Apply timezone offset
-      const startOffset = start.getTimezoneOffset() * 60 * 1000;
-      const endOffset = end.getTimezoneOffset() * 60 * 1000;
+      // Add buffer days to ensure we get all appointments
+      const bufferStart = new Date(localStart);
+      bufferStart.setDate(bufferStart.getDate() - 1);
+      const bufferEnd = new Date(localEnd);
+      bufferEnd.setDate(bufferEnd.getDate() + 1);
 
-      // Get timestamps in milliseconds
-      const startTimestamp = start.getTime() - startOffset;
-      const endTimestamp = end.getTime() - endOffset;
+      console.log('Date ranges:', {
+        requested: {
+          start: localStart.toISOString(),
+          end: localEnd.toISOString()
+        },
+        buffered: {
+          start: bufferStart.toISOString(),
+          end: bufferEnd.toISOString()
+        }
+      });
 
       const params = new URLSearchParams({
-        StartDate: startTimestamp.toString(),
-        EndDate: endTimestamp.toString(),
+        StartDate: bufferStart.getTime().toString(),
+        EndDate: bufferEnd.getTime().toString(),
         Status: 'Confirmed,WaitingConfirmation'
       });
 
@@ -48,8 +58,10 @@ export class IntakeQService {
         startDate,
         endDate,
         params: Object.fromEntries(params),
-        startTimestamp,
-        endTimestamp
+        requestedRange: {
+          start: localStart.toISOString(),
+          end: localEnd.toISOString()
+        }
       });
 
       const response = await fetch(url, {
@@ -64,19 +76,53 @@ export class IntakeQService {
         throw new Error(`IntakeQ API error (${response.status}): ${text}`);
       }
 
-      const data = JSON.parse(text);
+      const appointments = JSON.parse(text);
+
+      // Filter appointments to match exactly the requested date range
+      const filteredAppointments = appointments.filter((appt: IntakeQAppointment) => {
+        // Create dates for comparison using local time
+        const appointmentDate = new Date(appt.StartDateLocal);
+        
+        // Set all dates to midnight for comparison
+        appointmentDate.setHours(0,0,0,0);
+        const compareStart = new Date(localStart);
+        compareStart.setHours(0,0,0,0);
+        const compareEnd = new Date(localEnd);
+        compareEnd.setHours(0,0,0,0);
+
+        console.log('Comparing dates:', {
+          appointment: {
+            id: appt.Id,
+            name: appt.ClientName,
+            date: appointmentDate.toISOString(),
+            status: appt.Status,
+            time: appt.StartDateLocalFormatted
+          },
+          range: {
+            start: compareStart.toISOString(),
+            end: compareEnd.toISOString()
+          }
+        });
+
+        // Compare using local dates
+        return appointmentDate >= compareStart && appointmentDate <= compareEnd;
+      });
 
       console.log('IntakeQ Response:', {
         status: response.status,
-        appointmentCount: Array.isArray(data) ? data.length : 'Invalid response',
-        sampleAppointment: Array.isArray(data) && data.length > 0 ? {
-          id: data[0].Id,
-          status: data[0].Status,
-          startDate: data[0].StartDateIso
+        totalReturned: appointments.length,
+        matchingDateRange: filteredAppointments.length,
+        requestedStartDate: startDate,
+        requestedEndDate: endDate,
+        sampleAppointment: filteredAppointments[0] ? {
+          id: filteredAppointments[0].Id,
+          name: filteredAppointments[0].ClientName,
+          date: filteredAppointments[0].StartDateLocalFormatted,
+          status: filteredAppointments[0].Status
         } : null
       });
 
-      return Array.isArray(data) ? data : [];
+      return filteredAppointments;
     } catch (error) {
       console.error('IntakeQ API Error:', error instanceof Error ? error.message : 'Unknown error');
       

@@ -1,366 +1,407 @@
 // src/lib/scheduling/daily-assignment-service.ts
 
+// Add at the top of daily-assignment-service.ts
+function toEST(date: string | Date): Date {
+  const d = typeof date === 'string' ? new Date(date) : date;
+  return new Date(d.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+}
+
 import type { 
   AppointmentRecord,
   SchedulingConflict 
 } from '@/types/scheduling';
-import { transformIntakeQAppointment } from '@/lib/transformations/appointment-types';
+import type { 
+  SheetOffice, 
+  SheetClinician, 
+  ClientPreference
+} from '@/types/sheets';
+import { GoogleSheetsService, AuditEventType } from '@/lib/google/sheets';
 import type { IntakeQService } from '@/lib/intakeq/service';
+import { OfficeAssignmentService } from './office-assignment';
 
+interface DailyScheduleSummary {
+  date: string;
+  appointments: AppointmentRecord[];
+  conflicts: Array<{
+    type: 'double-booking' | 'accessibility' | 'capacity';
+    description: string;
+    severity: 'high' | 'medium' | 'low';
+    officeId?: string;
+    appointmentIds?: string[];
+  }>;
+  officeUtilization: Map<string, {
+    totalSlots: number;
+    bookedSlots: number;
+    specialNotes?: string[];
+  }>;
+  alerts: Array<{
+    type: 'accessibility' | 'capacity' | 'scheduling' | 'system';
+    message: string;
+    severity: 'high' | 'medium' | 'low';
+  }>;
+}
 
-  import type { 
-    SheetOffice,
-    SheetClinician,
-    ClientPreference
-  } from '@/types/sheets';
-  import { GoogleSheetsService, AuditEventType } from '@/lib/google/sheets';
-  
-  interface DailyScheduleSummary {
-    date: string;
-    appointments: AppointmentRecord[];
-    conflicts: Array<{
-      type: 'double-booking' | 'accessibility' | 'capacity';
-      description: string;
-      severity: 'high' | 'medium' | 'low';
-      officeId?: string;
-      appointmentIds?: string[];
-    }>;
-    officeUtilization: Map<string, {
-      totalSlots: number;
-      bookedSlots: number;
-      specialNotes?: string[];
-    }>;
-    alerts: Array<{
-      type: 'accessibility' | 'capacity' | 'scheduling' | 'system';
-      message: string;
-      severity: 'high' | 'medium' | 'low';
-    }>;
-  }
-  
-  export class DailyAssignmentService {
-    constructor(
-      private readonly sheetsService: GoogleSheetsService,
-      private readonly intakeQService: IntakeQService
-    ) {}
-  
-    /**
-     * Generate daily schedule summary
-     */
-    async generateDailySummary(date: string): Promise<DailyScheduleSummary> {
-      try {
-        // Get date range for today
-        const startOfDay = `${date}T00:00:00Z`;
-        const endOfDay = `${date}T23:59:59Z`;
-    
-        // Fetch all required data
-        console.log('Fetching IntakeQ appointments for:', date);
-        const [rawAppointments, offices, clinicians, clientPreferences] = await Promise.all([
-          this.intakeQService.getAppointments(startOfDay, endOfDay),
-          this.sheetsService.getOffices(),
-          this.sheetsService.getClinicians(),
-          this.sheetsService.getClientPreferences()
-        ]);
-    
-        // Transform IntakeQ appointments
-        console.log('Found raw appointments:', rawAppointments.length);
-        const appointments = rawAppointments.map(appt => transformIntakeQAppointment(appt));
-        console.log('Transformed appointments:', appointments.length);
-  
-        // Initialize summary structure
-        const summary: DailyScheduleSummary = {
-          date,
-          appointments,
-          conflicts: [],
-          officeUtilization: new Map(),
-          alerts: []
-        };
-  
-        // Process appointments and check for conflicts
-        this.processAppointments(summary, appointments, offices, clinicians, clientPreferences);
-  
-        // Calculate office utilization
-        this.calculateOfficeUtilization(summary, offices);
-  
-        // Generate alerts
-        this.generateAlerts(summary);
-  
-        // Log summary generation
-        await this.sheetsService.addAuditLog({
-          timestamp: new Date().toISOString(),
-          eventType: AuditEventType.DAILY_ASSIGNMENTS_UPDATED,
-          description: `Generated daily summary for ${date}`,
-          user: 'SYSTEM',
-          systemNotes: JSON.stringify({
-            appointmentCount: appointments.length,
-            conflictCount: summary.conflicts.length,
-            alertCount: summary.alerts.length
-          })
-        });
-  
-        return summary;
-      } catch (error) {
-        console.error('Error generating daily summary:', error);
-        throw error;
-      }
-    }
-  
-    /**
-     * Process appointments and identify conflicts
-     */
-    private processAppointments(
-      summary: DailyScheduleSummary,
-      appointments: AppointmentRecord[],
-      offices: SheetOffice[],
-      clinicians: SheetClinician[],
-      clientPreferences: ClientPreference[]
-    ): void {
-      // Check for double bookings
-      appointments.forEach((appt1, i) => {
-        appointments.slice(i + 1).forEach(appt2 => {
-          if (this.appointmentsOverlap(appt1, appt2)) {
-            // Same office double booking
-            if (appt1.officeId === appt2.officeId) {
-              summary.conflicts.push({
-                type: 'double-booking',
-                description: `Schedule conflict in office ${appt1.officeId}`,
-                severity: 'high',
-                officeId: appt1.officeId,
-                appointmentIds: [appt1.appointmentId, appt2.appointmentId]
-              });
-            }
-  
-            // Same clinician double booking
-            if (appt1.clinicianId === appt2.clinicianId) {
-              summary.conflicts.push({
-                type: 'double-booking',
-                description: `Clinician ${appt1.clinicianId} double booked`,
-                severity: 'high',
-                appointmentIds: [appt1.appointmentId, appt2.appointmentId]
-              });
-            }
-          }
-        });
-  
-        // Check accessibility requirements
-        const clientPref = clientPreferences.find(
-          pref => pref.clientId === appt1.clientId
-        );
-        const office = offices.find(
-          office => office.officeId === appt1.officeId
-        );
-  
-        if (clientPref?.mobilityNeeds.length && office && !office.isAccessible) {
-          summary.conflicts.push({
-            type: 'accessibility',
-            description: `Client requires accessible office but assigned to non-accessible space`,
-            severity: 'high',
-            officeId: appt1.officeId,
-            appointmentIds: [appt1.appointmentId]
-          });
-        }
+export class DailyAssignmentService {
+  constructor(
+    private readonly sheetsService: GoogleSheetsService,
+    private readonly intakeQService: IntakeQService
+  ) {}
+
+  async generateDailySummary(date: string): Promise<DailyScheduleSummary> {
+    try {
+      console.log('Generating daily summary for:', date);
+
+      // Convert to Eastern Time
+const estDate = new Date(date);
+estDate.setHours(0, 0, 0, 0);
+const startOfDay = estDate.toISOString();
+
+const estEndDate = new Date(date);
+estEndDate.setHours(23, 59, 59, 999);
+const endOfDay = estEndDate.toISOString();
+
+console.log('Date range for summary:', {
+  requestedDate: date,
+  startOfDay,
+  endOfDay,
+  estDate: estDate.toLocaleString('en-US', { timeZone: 'America/New_York' })
+});
+
+      // Fetch all required data
+      console.log('Fetching data...');
+      const [intakeQAppointments, offices, clinicians, clientPreferences, localAppointments] = await Promise.all([
+        this.intakeQService.getAppointments(startOfDay, endOfDay),
+        this.sheetsService.getOffices(),
+        this.sheetsService.getClinicians(),
+        this.sheetsService.getClientPreferences(),
+        this.sheetsService.getAppointments(startOfDay, endOfDay)
+      ]);
+
+      console.log('Found appointments:', {
+        intakeQ: intakeQAppointments.length,
+        local: localAppointments.length
       });
-    }
-  
-    /**
-     * Calculate office utilization
-     */
-    private calculateOfficeUtilization(
-      summary: DailyScheduleSummary,
-      offices: SheetOffice[]
-    ): void {
-      offices.forEach(office => {
-        const officeAppointments = summary.appointments.filter(
-          appt => appt.officeId === office.officeId
-        );
-  
-        // Assuming 8 hour day with 1 hour slots
-        const totalSlots = 8;
-        const bookedSlots = officeAppointments.length;
-  
-        summary.officeUtilization.set(office.officeId, {
-          totalSlots,
-          bookedSlots,
-          specialNotes: this.getOfficeNotes(office, bookedSlots / totalSlots)
-        });
-  
-        // Check for capacity issues
-        if (bookedSlots / totalSlots > 0.9) {
-          summary.alerts.push({
-            type: 'capacity',
-            message: `Office ${office.officeId} is near capacity`,
-            severity: 'medium'
-          });
-        }
-      });
-    }
-  
-    /**
-     * Generate system alerts
-     */
-    private generateAlerts(summary: DailyScheduleSummary): void {
-      // High priority conflicts
-      const highPriorityConflicts = summary.conflicts.filter(
-        conflict => conflict.severity === 'high'
+
+      // Create lookup maps
+      const clinicianMap = new Map(
+        clinicians.map(c => [c.intakeQPractitionerId, c]) // Map practitioner ID to clinician object
       );
-  
-      if (highPriorityConflicts.length > 0) {
-        summary.alerts.push({
-          type: 'scheduling',
-          message: `${highPriorityConflicts.length} high-priority conflicts detected`,
-          severity: 'high'
-        });
-      }
-  
-      // Capacity warnings
-      const highCapacityOffices = Array.from(summary.officeUtilization.entries())
-        .filter(([_, data]) => data.bookedSlots / data.totalSlots > 0.8);
-  
-      if (highCapacityOffices.length > 0) {
-        summary.alerts.push({
-          type: 'capacity',
-          message: `${highCapacityOffices.length} offices are at high capacity`,
-          severity: 'medium'
-        });
-      }
+
+      // Process appointments
+      console.log('Processing IntakeQ appointments...');
+      const processedIntakeQAppointments = await Promise.all(intakeQAppointments.map(async intakeQAppt => {
+        // Get local appointment if exists
+        const localAppt = localAppointments.find(appt => appt.appointmentId === intakeQAppt.Id);
+        const clinician = clinicianMap.get(intakeQAppt.PractitionerId);
+
+        // If no local appointment exists, assign an office
+        let officeId = localAppt?.officeId;
+        let notes = localAppt?.notes;
+
+        if (!officeId && clinician) {
+          const assignmentService = new OfficeAssignmentService(
+            offices,
+            await this.sheetsService.getAssignmentRules(),
+            clinicians
+          );
+
+          const result = await assignmentService.findOptimalOffice({
+            clientId: intakeQAppt.ClientId.toString(),
+            clinicianId: clinician.clinicianId,
+            dateTime: intakeQAppt.StartDateIso,
+            duration: this.calculateDuration(intakeQAppt.StartDateIso, intakeQAppt.EndDateIso),
+            sessionType: this.determineSessionType(intakeQAppt.ServiceName)
+          });
+
+          if (result.success) {
+            officeId = result.officeId;
+            notes = result.notes;
+          }
+        }
+
+        return {
+          appointmentId: intakeQAppt.Id,
+          clientId: intakeQAppt.ClientId.toString(),
+          clientName: intakeQAppt.ClientName,
+          clinicianId: clinicianMap.get(intakeQAppt.PractitionerId)?.clinicianId || intakeQAppt.PractitionerId,
+    clinicianName: clinicianMap.get(intakeQAppt.PractitionerId)?.name || 'Unknown',
+          officeId: officeId || '',
+          sessionType: this.determineSessionType(intakeQAppt.ServiceName),
+          startTime: intakeQAppt.StartDateIso,
+          endTime: intakeQAppt.EndDateIso,
+          status: localAppt?.status || 'scheduled',
+          lastUpdated: new Date().toISOString(),
+          source: localAppt?.source || 'intakeq' as 'intakeq' | 'manual',
+          requirements: localAppt?.requirements || {
+            accessibility: false,
+            specialFeatures: []
+          },
+          notes
+        };
+      }));
+
+      // Sort appointments by time
+      // Process local appointments that aren't from IntakeQ
+      console.log('Processing local appointments...');
+      const localOnlyAppointments = localAppointments.filter(
+        local => !intakeQAppointments.some(intakeQ => intakeQ.Id === local.appointmentId)
+      );
+
+      console.log('Appointment counts:', {
+        intakeQ: processedIntakeQAppointments.length,
+        localOnly: localOnlyAppointments.length
+      });
+
+      // Combine all appointments
+      const allAppointments = [...processedIntakeQAppointments, ...localOnlyAppointments];
+
+      // Sort appointments by time
+      allAppointments.sort((a, b) => {
+        if (a.clinicianName < b.clinicianName) return -1;
+        if (a.clinicianName > b.clinicianName) return 1;
+        return new Date(a.startTime).getTime() - new Date(b.startTime).getTime();
+      });
+
+      // Create summary
+      const summary: DailyScheduleSummary = {
+        date,
+        appointments: allAppointments,
+        conflicts: [],
+        officeUtilization: new Map(),
+        alerts: []
+      };
+
+      // Process conflicts and generate alerts
+      this.processAppointments(summary, allAppointments, offices, clinicians, clientPreferences);
+      this.calculateOfficeUtilization(summary, offices);
+      this.generateAlerts(summary);
+
+      // Log summary
+      await this.sheetsService.addAuditLog({
+        timestamp: new Date().toISOString(),
+        eventType: AuditEventType.DAILY_ASSIGNMENTS_UPDATED,
+        description: `Generated daily summary for ${date}`,
+        user: 'SYSTEM',
+        systemNotes: JSON.stringify({
+          appointmentCount: allAppointments.length,
+          conflictCount: summary.conflicts.length,
+          alertCount: summary.alerts.length
+        })
+      });
+
+      console.log('Final summary:', {
+        date,
+        totalAppointments: summary.appointments.length,
+        intakeQCount: processedIntakeQAppointments.length,
+        localCount: localOnlyAppointments.length,
+        conflicts: summary.conflicts.length,
+        alerts: summary.alerts.length,
+        sampleAppointments: summary.appointments.slice(0, 2).map(appt => ({
+          id: appt.appointmentId,
+          client: appt.clientName,
+          time: appt.startTime
+        }))
+      });
+
+      return summary;
+    } catch (error) {
+      console.error('Error generating daily summary:', error);
+      throw error;
     }
-  
-    /**
-     * Get special notes for office utilization
-     */
-    private getOfficeNotes(office: SheetOffice, utilization: number): string[] {
-      const notes: string[] = [];
-  
-      if (utilization > 0.9) {
-        notes.push('Critical capacity warning');
-      } else if (utilization > 0.8) {
-        notes.push('High utilization');
+  }
+
+  private calculateDuration(startTime: string, endTime: string): number {
+    const start = new Date(startTime);
+    const end = new Date(endTime);
+    return Math.round((end.getTime() - start.getTime()) / (60 * 1000));
+  }
+
+  private determineSessionType(serviceName: string): 'in-person' | 'telehealth' | 'group' | 'family' {
+    const name = serviceName.toLowerCase();
+    if (name.includes('telehealth') || name.includes('virtual')) return 'telehealth';
+    if (name.includes('group')) return 'group';
+    if (name.includes('family') || name.includes('relationship')) return 'family';
+    return 'in-person';
+  }
+
+  private processAppointments(
+    summary: DailyScheduleSummary,
+    appointments: AppointmentRecord[],
+    offices: SheetOffice[],
+    clinicians: SheetClinician[],
+    clientPreferences: ClientPreference[]
+  ): void {
+    appointments.forEach((appt1, i) => {
+      // Check for overlapping appointments
+      appointments.slice(i + 1).forEach(appt2 => {
+        // Only check for overlaps if appointments are on the same day
+        const sameDay = appt1.startTime.split('T')[0] === appt2.startTime.split('T')[0];
+        
+        if (sameDay && this.appointmentsOverlap(appt1, appt2)) {
+          // Skip telehealth appointments from conflict detection
+          if (appt1.sessionType === 'telehealth' || appt2.sessionType === 'telehealth') {
+            return;
+          }
+          
+          // Check for same office conflicts
+          if (appt1.officeId === appt2.officeId) {
+            summary.conflicts.push({
+              type: 'double-booking',
+              description: `Schedule conflict in ${appt1.officeId}: ${appt1.clientName || appt1.clientId} and ${appt2.clientName || appt2.clientId}`,
+              severity: 'high',
+              officeId: appt1.officeId,
+              appointmentIds: [appt1.appointmentId, appt2.appointmentId]
+            });
+          }
+    
+          // Check for clinician double-booking
+          if (appt1.clinicianId === appt2.clinicianId) {
+            summary.conflicts.push({
+              type: 'double-booking',
+              description: `${appt1.clinicianName || appt1.clinicianId} has overlapping appointments`,
+              severity: 'high',
+              appointmentIds: [appt1.appointmentId, appt2.appointmentId]
+            });
+          }
+        }
+      });
+      // Check for overlapping appointments
+      appointments.slice(i + 1).forEach(appt2 => {
+        if (this.appointmentsOverlap(appt1, appt2)) {
+          if (appt1.officeId === appt2.officeId) {
+            summary.conflicts.push({
+              type: 'double-booking',
+              description: `Schedule conflict in ${appt1.officeId}: ${appt1.clientName} and ${appt2.clientName}`,
+              severity: 'high',
+              officeId: appt1.officeId,
+              appointmentIds: [appt1.appointmentId, appt2.appointmentId]
+            });
+          }
+
+          if (appt1.clinicianId === appt2.clinicianId) {
+            summary.conflicts.push({
+              type: 'double-booking',
+              description: `${appt1.clinicianName} has overlapping appointments`,
+              severity: 'high',
+              appointmentIds: [appt1.appointmentId, appt2.appointmentId]
+            });
+          }
+        }
+      });
+
+      // Check accessibility requirements
+      const clientPref = clientPreferences.find(
+        pref => pref.clientId === appt1.clientId
+      );
+      const office = offices.find(
+        office => office.officeId === appt1.officeId
+      );
+
+      if (clientPref?.mobilityNeeds.length && office && !office.isAccessible) {
+        summary.conflicts.push({
+          type: 'accessibility',
+          description: `${appt1.clientName} requires accessible office but assigned to ${appt1.officeId}`,
+          severity: 'high',
+          officeId: appt1.officeId,
+          appointmentIds: [appt1.appointmentId]
+        });
       }
-  
+    });
+  }
+
+  private calculateOfficeUtilization(
+    summary: DailyScheduleSummary,
+    offices: SheetOffice[]
+  ): void {
+    offices.forEach(office => {
+      const officeAppointments = summary.appointments.filter(
+        appt => appt.officeId === office.officeId
+      );
+
+      const totalSlots = 8; // 8-hour day
+      const bookedSlots = officeAppointments.length;
+
+      const notes: string[] = [];
       if (office.isFlexSpace) {
         notes.push('Flex space - coordinate with team');
       }
-  
-      return notes;
-    }
-  
-    /**
-     * Check if two appointments overlap
-     */
-    private appointmentsOverlap(appt1: AppointmentRecord, appt2: AppointmentRecord): boolean {
-      const start1 = new Date(appt1.startTime);
-      const end1 = new Date(appt1.endTime);
-      const start2 = new Date(appt2.startTime);
-      const end2 = new Date(appt2.endTime);
-  
-      return start1 < end2 && end1 > start2;
-    }
-  
-    /**
-     * Format daily summary as HTML email
-     */
-    formatEmailContent(summary: DailyScheduleSummary): string {
-      return `
-        <h1>Daily Schedule Summary - ${summary.date}</h1>
-        
-        ${this.formatAlerts(summary.alerts)}
-        
-        ${this.formatConflicts(summary.conflicts)}
-        
-        ${this.formatAppointments(summary.appointments)}
-        
-        ${this.formatOfficeUtilization(summary.officeUtilization)}
-        
-        <p>Generated on ${new Date().toLocaleString()}</p>
-      `;
-    }
-  
-    private formatAlerts(alerts: DailyScheduleSummary['alerts']): string {
-      if (alerts.length === 0) return '';
-  
-      return `
-        <h2>Alerts</h2>
-        <ul>
-          ${alerts.map(alert => `
-            <li style="color: ${this.getSeverityColor(alert.severity)}">
-              ${alert.type.toUpperCase()}: ${alert.message}
-            </li>
-          `).join('')}
-        </ul>
-      `;
-    }
-  
-    private formatConflicts(conflicts: DailyScheduleSummary['conflicts']): string {
-      if (conflicts.length === 0) return '';
-  
-      return `
-        <h2>Conflicts</h2>
-        <ul>
-          ${conflicts.map(conflict => `
-            <li style="color: ${this.getSeverityColor(conflict.severity)}">
-              ${conflict.type}: ${conflict.description}
-              ${conflict.officeId ? `(Office: ${conflict.officeId})` : ''}
-            </li>
-          `).join('')}
-        </ul>
-      `;
-    }
-  
-    private formatAppointments(appointments: AppointmentRecord[]): string {
-      return `
-        <h2>Appointments</h2>
-        <table style="width: 100%; border-collapse: collapse;">
-          <tr>
-            <th>Time</th>
-            <th>Office</th>
-            <th>Client</th>
-            <th>Clinician</th>
-            <th>Type</th>
-          </tr>
-          ${appointments
-            .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())
-            .map(appt => `
-              <tr>
-                <td>${new Date(appt.startTime).toLocaleTimeString()} - ${new Date(appt.endTime).toLocaleTimeString()}</td>
-                <td>${appt.officeId}</td>
-                <td>${appt.clientId}</td>
-                <td>${appt.clinicianId}</td>
-                <td>${appt.sessionType}</td>
-              </tr>
-            `).join('')}
-        </table>
-      `;
-    }
-  
-    private formatOfficeUtilization(utilization: DailyScheduleSummary['officeUtilization']): string {
-      return `
-        <h2>Office Utilization</h2>
-        <table style="width: 100%; border-collapse: collapse;">
-          <tr>
-            <th>Office</th>
-            <th>Utilization</th>
-            <th>Notes</th>
-          </tr>
-          ${Array.from(utilization.entries()).map(([officeId, data]) => `
-            <tr>
-              <td>${officeId}</td>
-              <td>${Math.round((data.bookedSlots / data.totalSlots) * 100)}%</td>
-              <td>${data.specialNotes?.join(', ') || ''}</td>
-            </tr>
-          `).join('')}
-        </table>
-      `;
-    }
-  
-    private getSeverityColor(severity: 'high' | 'medium' | 'low'): string {
-      switch (severity) {
-        case 'high':
-          return '#dc2626';
-        case 'medium':
-          return '#d97706';
-        case 'low':
-          return '#059669';
-        default:
-          return '#000000';
+      if (bookedSlots / totalSlots > 0.9) {
+        notes.push('Critical capacity warning');
+      } else if (bookedSlots / totalSlots > 0.8) {
+        notes.push('High utilization');
       }
+
+      summary.officeUtilization.set(office.officeId, {
+        totalSlots,
+        bookedSlots,
+        specialNotes: notes
+      });
+    });
+  }
+
+  private appointmentsOverlap(appt1: AppointmentRecord, appt2: AppointmentRecord): boolean {
+    // Convert times to minutes since midnight for easier comparison
+    const getMinutes = (time: string) => {
+      const date = new Date(time);
+      return date.getUTCHours() * 60 + date.getUTCMinutes();
+    };
+  
+    const start1 = getMinutes(appt1.startTime);
+    const end1 = start1 + this.getDurationMinutes(appt1.startTime, appt1.endTime);
+    const start2 = getMinutes(appt2.startTime);
+    const end2 = start2 + this.getDurationMinutes(appt2.startTime, appt2.endTime);
+  
+    console.log('Checking overlap:', {
+      appt1: {
+        id: appt1.appointmentId,
+        client: appt1.clientName || appt1.clientId,
+        start: start1,
+        end: end1,
+        time: new Date(appt1.startTime).toLocaleString()
+      },
+      appt2: {
+        id: appt2.appointmentId,
+        client: appt2.clientName || appt2.clientId,
+        start: start2,
+        end: end2,
+        time: new Date(appt2.startTime).toLocaleString()
+      }
+    });
+  
+    // Check actual overlap
+    return start1 < end2 && end1 > start2;
+  }
+  
+  private getDurationMinutes(startTime: string, endTime: string): number {
+    const start = new Date(startTime);
+    const end = new Date(endTime);
+    return Math.round((end.getTime() - start.getTime()) / (60 * 1000));
+  }
+
+  private generateAlerts(summary: DailyScheduleSummary): void {
+    // Check high priority conflicts
+    const highPriorityConflicts = summary.conflicts.filter(
+      conflict => conflict.severity === 'high'
+    );
+
+    if (highPriorityConflicts.length > 0) {
+      summary.alerts.push({
+        type: 'scheduling',
+        message: `${highPriorityConflicts.length} high-priority conflicts detected`,
+        severity: 'high'
+      });
+    }
+
+    // Check office capacity
+    const highCapacityOffices = Array.from(summary.officeUtilization.entries())
+      .filter(([_, data]) => data.bookedSlots / data.totalSlots > 0.8);
+
+    if (highCapacityOffices.length > 0) {
+      summary.alerts.push({
+        type: 'capacity',
+        message: `${highCapacityOffices.length} offices are at high capacity`,
+        severity: 'medium'
+      });
     }
   }
+}

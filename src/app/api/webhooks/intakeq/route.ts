@@ -8,22 +8,12 @@ import type { WebhookResponse } from '@/types/webhooks';
 
 export async function POST(request: Request): Promise<NextResponse<WebhookResponse>> {
   try {
-    // Get raw body and signature
-    const signature = request.headers.get('x-intakeq-signature');
+    // Get raw body
     const rawBody = await request.text();
 
     console.log('Webhook request received:', {
-      hasSignature: !!signature,
       bodyLength: rawBody.length
     });
-
-    if (!signature) {
-      return NextResponse.json({
-        success: false,
-        error: 'Missing webhook signature',
-        timestamp: new Date().toISOString()
-      }, { status: 401 });
-    }
 
     // Initialize services
     const sheetsService = await initializeGoogleSheets();
@@ -35,22 +25,10 @@ export async function POST(request: Request): Promise<NextResponse<WebhookRespon
     );
     console.log('IntakeQ service initialized');
 
-    // Validate signature
-    const isValid = await intakeQService.validateWebhookSignature(rawBody, signature);
-    console.log('Signature validation:', { isValid });
-
-    if (!isValid) {
-      return NextResponse.json({
-        success: false,
-        error: 'Invalid webhook signature',
-        timestamp: new Date().toISOString()
-      }, { status: 401 });
-    }
-
     // Parse payload
     const payload = JSON.parse(rawBody);
     console.log('Processing webhook:', {
-      type: payload.Type,
+      type: payload.EventType,
       clientId: payload.ClientId,
       appointmentId: payload.Appointment?.Id,
       startDate: payload.Appointment?.StartDateIso,
@@ -58,7 +36,7 @@ export async function POST(request: Request): Promise<NextResponse<WebhookRespon
     });
 
     // Handle appointment events
-    if (payload.Type.startsWith('Appointment')) {
+    if (payload.EventType.startsWith('Appointment')) {
       console.log('Creating appointment handler');
       const handler = new AppointmentHandler(sheetsService);
       console.log('Processing appointment with handler');

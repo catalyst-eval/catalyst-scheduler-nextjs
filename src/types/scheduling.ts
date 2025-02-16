@@ -1,20 +1,23 @@
 // src/types/scheduling.ts
 
 export type SessionType = 'in-person' | 'telehealth' | 'group' | 'family';
-export type SessionPriority = 'high' | 'medium' | 'low';
+export type AppointmentSource = 'intakeq' | 'manual';
+// Add after export type AppointmentSource = 'intakeq' | 'manual';
 export type AlertSeverity = 'high' | 'medium' | 'low';
 
 export interface AppointmentRecord {
   appointmentId: string;
   clientId: string;
+  clientName: string; // Add this property
   clinicianId: string;
+  clinicianName: string; // Add this property
   officeId: string;
-  sessionType: SessionType;
+  sessionType: 'in-person' | 'telehealth' | 'group' | 'family';
   startTime: string;
   endTime: string;
   status: 'scheduled' | 'completed' | 'cancelled' | 'rescheduled';
   lastUpdated: string;
-  source: 'intakeq' | 'manual';
+  source: 'intakeq' | 'manual'; // Update the type to a union type
   requirements?: {
     accessibility?: boolean;
     specialFeatures?: string[];

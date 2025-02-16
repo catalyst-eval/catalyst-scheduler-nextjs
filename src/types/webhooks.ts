@@ -10,7 +10,11 @@ export type WebhookEventType =
   | 'Appointment Created'  // Keep old formats for backward compatibility
   | 'Appointment Updated'
   | 'Appointment Rescheduled'
-  | 'Appointment Cancelled';
+  | 'Appointment Cancelled'
+  | 'AppointmentCanceled'
+  | 'Appointment Canceled'
+  | 'AppointmentDeleted'
+  | 'Appointment Deleted';
 
 export interface IntakeQAppointment {
   Id: string;
@@ -52,8 +56,8 @@ export interface IntakeQAppointment {
 
 export interface IntakeQWebhookPayload {
   IntakeId?: string;
-  Type: WebhookEventType;  // Keep Type for backward compatibility
-  EventType?: WebhookEventType; // Support both field names
+  Type?: WebhookEventType;  // Keep Type for backward compatibility
+  EventType: WebhookEventType; // Make EventType required
   ClientId: number;
   ExternalClientId?: string;
   PracticeId: string;
