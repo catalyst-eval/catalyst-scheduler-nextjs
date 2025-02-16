@@ -24,7 +24,7 @@ export class EnhancedWebhookHandler {
   /**
    * Get event type from payload, handling both field names
    */
-  private getEventType(payload: IntakeQWebhookPayload): WebhookEventType {
+  private getEventType(payload: Partial<IntakeQWebhookPayload>): WebhookEventType | undefined {
     // Use EventType if available, fall back to Type
     return payload.EventType || payload.Type;
   }
@@ -91,6 +91,7 @@ export class EnhancedWebhookHandler {
     const typedPayload = payload as Partial<IntakeQWebhookPayload>;
 
     // Required fields validation - check both Type and EventType
+    const eventType = this.getEventType(typedPayload);
     if (!typedPayload.Type && !typedPayload.EventType) {
       return { isValid: false, error: 'Missing event type field' };
     }
@@ -131,11 +132,13 @@ export class EnhancedWebhookHandler {
       let result: WebhookProcessingResult;
 
       const eventType = this.getEventType(payload);
-      switch (eventType) {
-        case 'Appointment Created':
-        case 'Appointment Updated':
-          result = await this.appointmentSync.processAppointmentEvent(payload);
-          break;
+switch (eventType) {
+  case 'Appointment Created':
+  case 'Appointment Updated':
+  case 'AppointmentCreated':
+  case 'AppointmentUpdated':
+    result = await this.appointmentSync.processAppointmentEvent(payload);
+    break;
 
         case 'Intake Submitted':
           // Handle intake form submission

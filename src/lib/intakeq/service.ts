@@ -22,98 +22,89 @@ export class IntakeQService {
 
   async getAppointments(startDate: string, endDate: string): Promise<IntakeQAppointment[]> {
     try {
-      // Convert to local timezone dates
-      const localStart = new Date(startDate);
-localStart.setUTCHours(0, 0, 0, 0);
-const localEnd = new Date(endDate);
-localEnd.setUTCHours(23, 59, 59, 999);
-
+      console.log('Fetching IntakeQ appointments:', { startDate, endDate });
+      
+      // Convert to EST dates
+      const requestedStart = new Date(startDate);
+      const requestedEnd = new Date(endDate);
+      
       // Add buffer days to ensure we get all appointments
-      const bufferStart = new Date(localStart);
+      const bufferStart = new Date(requestedStart);
       bufferStart.setDate(bufferStart.getDate() - 1);
-      const bufferEnd = new Date(localEnd);
+      const bufferEnd = new Date(requestedEnd);
       bufferEnd.setDate(bufferEnd.getDate() + 1);
-
+  
       console.log('Date ranges:', {
         requested: {
-          start: localStart.toISOString(),
-          end: localEnd.toISOString()
+          start: requestedStart.toISOString(),
+          end: requestedEnd.toISOString()
         },
         buffered: {
           start: bufferStart.toISOString(),
           end: bufferEnd.toISOString()
         }
       });
-
+  
       const params = new URLSearchParams({
         StartDate: bufferStart.getTime().toString(),
         EndDate: bufferEnd.getTime().toString(),
-        Status: 'Confirmed,WaitingConfirmation'
+        Status: 'Confirmed,WaitingConfirmation',
+        dateField: 'StartDateIso'
       });
-
+  
       const url = `${this.baseUrl}/appointments?${params}`;
-
+  
       console.log('IntakeQ Request:', {
         endpoint: '/appointments',
-        startDate,
-        endDate,
         params: Object.fromEntries(params),
         requestedRange: {
-          start: localStart.toISOString(),
-          end: localEnd.toISOString()
+          start: requestedStart.toISOString(),
+          end: requestedEnd.toISOString()
         }
       });
-
+  
       const response = await fetch(url, {
         method: 'GET',
         headers: this.headers
       });
-
+  
       const text = await response.text();
       console.log('Raw IntakeQ Response:', text.substring(0, 500) + '...');
-
+  
       if (!response.ok) {
         throw new Error(`IntakeQ API error (${response.status}): ${text}`);
       }
-
+  
       const appointments = JSON.parse(text);
+  
+      // In getAppointments method
+const filteredAppointments = appointments.filter((appt: IntakeQAppointment) => {
+  const apptDate = new Date(appt.StartDateIso);
+  const requestStart = new Date(requestedStart);
+  const requestEnd = new Date(requestedEnd);
+  
+  // Convert to EST strings for comparison
+  const apptESTDate = apptDate.toLocaleString('en-US', { timeZone: 'America/New_York' }).split(',')[0];
+  const targetESTDate = requestStart.toLocaleString('en-US', { timeZone: 'America/New_York' }).split(',')[0];
+  
+  console.log('Comparing dates:', {
+    appointment: {
+      id: appt.Id,
+      name: appt.ClientName,
+      date: apptESTDate,
+      status: appt.Status,
+      time: appt.StartDateLocalFormatted
+    },
+    target: targetESTDate
+  });
 
-      // Filter appointments to match exactly the requested date range
-      const filteredAppointments = appointments.filter((appt: IntakeQAppointment) => {
-        // Create dates for comparison using local time
-        const appointmentDate = new Date(appt.StartDateLocal);
-        
-        // Set all dates to midnight for comparison
-        appointmentDate.setHours(0,0,0,0);
-        const compareStart = new Date(localStart);
-        compareStart.setHours(0,0,0,0);
-        const compareEnd = new Date(localEnd);
-        compareEnd.setHours(0,0,0,0);
-
-        console.log('Comparing dates:', {
-          appointment: {
-            id: appt.Id,
-            name: appt.ClientName,
-            date: appointmentDate.toISOString(),
-            status: appt.Status,
-            time: appt.StartDateLocalFormatted
-          },
-          range: {
-            start: compareStart.toISOString(),
-            end: compareEnd.toISOString()
-          }
-        });
-
-        // Compare using local dates
-        return appointmentDate >= compareStart && appointmentDate <= compareEnd;
-      });
-
+  return apptESTDate === targetESTDate;
+});
+  
       console.log('IntakeQ Response:', {
         status: response.status,
         totalReturned: appointments.length,
         matchingDateRange: filteredAppointments.length,
-        requestedStartDate: startDate,
-        requestedEndDate: endDate,
         sampleAppointment: filteredAppointments[0] ? {
           id: filteredAppointments[0].Id,
           name: filteredAppointments[0].ClientName,
@@ -121,7 +112,7 @@ localEnd.setUTCHours(23, 59, 59, 999);
           status: filteredAppointments[0].Status
         } : null
       });
-
+  
       return filteredAppointments;
     } catch (error) {
       console.error('IntakeQ API Error:', error instanceof Error ? error.message : 'Unknown error');

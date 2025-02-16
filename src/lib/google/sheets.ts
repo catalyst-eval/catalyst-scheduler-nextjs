@@ -298,75 +298,99 @@ export class GoogleSheetsService {
     }
   }
 
-  async getAppointments(startDate: string, endDate: string): Promise<AppointmentRecord[]> {
-    try {
-      const values = await this.readSheet('Appointments!A2:N');
-      
-      if (!values || !Array.isArray(values)) {
-        console.log('No appointments found in sheet');
-        return [];
-      }
-  
-      const mappedAppointments: AppointmentRecord[] = values
-        .map(row => {
-          try {
-            const appointment: AppointmentRecord = {
-              appointmentId: row[0] || '',
-              clientId: row[1] || '',
-              clientName: row[1] || '', // Temporary placeholder for client name
-              clinicianId: row[2] || '',
-              clinicianName: row[2] || '', // Temporary placeholder for clinician name
-              officeId: row[3] || '',
-              sessionType: (row[4] || 'in-person') as 'in-person' | 'telehealth' | 'group' | 'family',
-              startTime: row[5] || '',
-              endTime: row[6] || '',
-              status: (row[7] || 'scheduled') as 'scheduled' | 'completed' | 'cancelled' | 'rescheduled',
-              lastUpdated: row[8] || new Date().toISOString(),
-              source: (row[9] || 'manual') as 'intakeq' | 'manual'
-            };
-  
-            if (row[10]) {
-              appointment.requirements = JSON.parse(row[10]);
-            }
-  
-            if (row[11]) {
-              appointment.notes = row[11];
-            }
-  
-            return appointment;
-          } catch (error) {
-            console.error('Error mapping appointment row:', error, { row });
-            return null;
-          }
-        })
-        .filter((appt): appt is AppointmentRecord => appt !== null)
-        .filter(appt => {
-          try {
-            // Get dates without time components for comparison
-            const apptDate = new Date(appt.startTime).toISOString().split('T')[0];
-            const targetDate = new Date(startDate).toISOString().split('T')[0];
-            
-            console.log('Filtering appointment:', {
-              id: appt.appointmentId,
-              apptDate,
-              targetDate,
-              startTime: appt.startTime,
-              match: apptDate === targetDate
-            });
-            
-            return apptDate === targetDate;
-          } catch (error) {
-            console.error('Error filtering appointment:', error, { appt });
-            return false;
-          }
-        });
-  
-      return mappedAppointments;
-    } catch (error) {
-      console.error('Error reading appointments:', error);
-      throw new Error('Failed to read appointments');
+  // In sheets.ts
+async getAppointments(startDate: string, endDate: string): Promise<AppointmentRecord[]> {
+  try {
+    const values = await this.readSheet('Appointments!A2:N');
+    
+    if (!values || !Array.isArray(values)) {
+      console.log('No appointments found in sheet');
+      return [];
     }
+
+    console.log('Processing appointments from sheet:', {
+      rowCount: values.length,
+      dateRange: { startDate, endDate }
+    });
+
+    const mappedAppointments: AppointmentRecord[] = values
+      .map(row => {
+        try {
+          const appointment: AppointmentRecord = {
+            appointmentId: row[0] || '',
+            clientId: row[1] || '',
+            clientName: row[2] || row[1] || '', // Use name if available, fall back to ID
+            clinicianId: row[3] || '',
+            clinicianName: row[4] || row[3] || '', // Use name if available, fall back to ID
+            officeId: row[5] || '',
+            sessionType: (row[6] || 'in-person') as 'in-person' | 'telehealth' | 'group' | 'family',
+            startTime: row[7] || '',
+            endTime: row[8] || '',
+            status: (row[9] || 'scheduled') as 'scheduled' | 'completed' | 'cancelled' | 'rescheduled',
+            lastUpdated: row[10] || new Date().toISOString(),
+            source: (row[11] || 'manual') as 'intakeq' | 'manual',
+            requirements: { accessibility: false, specialFeatures: [] },
+            notes: ''
+          };
+
+          // Parse requirements JSON safely
+          try {
+            const requirementsStr = row[12]?.toString().trim();
+            if (requirementsStr) {
+              // Remove any control characters and clean the JSON string
+              const cleanJson = requirementsStr
+                .replace(/[\u0000-\u0019]+/g, '')
+                .replace(/\s+/g, ' ')
+                .trim();
+              appointment.requirements = JSON.parse(cleanJson);
+            }
+          } catch (err) {
+            console.error('Error parsing requirements JSON:', err, {value: row[12]});
+          }
+
+          // Add notes if present
+          if (row[13]) {
+            appointment.notes = row[13];
+          }
+
+          return appointment;
+        } catch (error) {
+          console.error('Error mapping appointment row:', error, { row });
+          return null;
+        }
+      })
+      .filter((appt): appt is AppointmentRecord => appt !== null)
+      .filter(appt => {
+        try {
+          const apptDate = new Date(appt.startTime).toISOString().split('T')[0];
+          const targetDate = new Date(startDate).toISOString().split('T')[0];
+          
+          console.log('Filtering appointment:', {
+            id: appt.appointmentId,
+            date: apptDate,
+            target: targetDate,
+            match: apptDate === targetDate,
+            startTime: appt.startTime
+          });
+          
+          return apptDate === targetDate;
+        } catch (error) {
+          console.error('Error filtering appointment:', error, { appt });
+          return false;
+        }
+      });
+
+    console.log('Appointment processing complete:', {
+      totalFound: mappedAppointments.length,
+      dateRange: { startDate, endDate }
+    });
+
+    return mappedAppointments;
+  } catch (error) {
+    console.error('Error reading appointments:', error);
+    throw new Error('Failed to read appointments');
   }
+}
 
   async updateAppointment(appointment: AppointmentRecord): Promise<void> {
     try {

@@ -1,11 +1,6 @@
 // src/lib/scheduling/daily-assignment-service.ts
 
-// Add at the top of daily-assignment-service.ts
-function toEST(date: string | Date): Date {
-  const d = typeof date === 'string' ? new Date(date) : date;
-  return new Date(d.toLocaleString('en-US', { timeZone: 'America/New_York' }));
-}
-
+import { toEST, getESTDayRange, isSameESTDay } from '../util/date-helpers';
 import type { 
   AppointmentRecord,
   SchedulingConflict 
@@ -15,6 +10,7 @@ import type {
   SheetClinician, 
   ClientPreference
 } from '@/types/sheets';
+
 import { GoogleSheetsService, AuditEventType } from '@/lib/google/sheets';
 import type { IntakeQService } from '@/lib/intakeq/service';
 import { OfficeAssignmentService } from './office-assignment';
@@ -50,22 +46,18 @@ export class DailyAssignmentService {
   async generateDailySummary(date: string): Promise<DailyScheduleSummary> {
     try {
       console.log('Generating daily summary for:', date);
-
-      // Convert to Eastern Time
-const estDate = new Date(date);
-estDate.setHours(0, 0, 0, 0);
-const startOfDay = estDate.toISOString();
-
-const estEndDate = new Date(date);
-estEndDate.setHours(23, 59, 59, 999);
-const endOfDay = estEndDate.toISOString();
-
-console.log('Date range for summary:', {
-  requestedDate: date,
-  startOfDay,
-  endOfDay,
-  estDate: estDate.toLocaleString('en-US', { timeZone: 'America/New_York' })
-});
+      
+      // Get date range in EST
+      const range = getESTDayRange(date);
+const startOfDay = range.start;
+const endOfDay = range.end;
+      
+      console.log('Date range for summary:', {
+        requestedDate: date,
+        startOfDay,
+        endOfDay,
+        estDate: toEST(date).toLocaleString('en-US', { timeZone: 'America/New_York' })
+      });
 
       // Fetch all required data
       console.log('Fetching data...');
@@ -235,7 +227,7 @@ console.log('Date range for summary:', {
       // Check for overlapping appointments
       appointments.slice(i + 1).forEach(appt2 => {
         // Only check for overlaps if appointments are on the same day
-        const sameDay = appt1.startTime.split('T')[0] === appt2.startTime.split('T')[0];
+        const sameDay = isSameESTDay(appt1.startTime, appt2.startTime);
         
         if (sameDay && this.appointmentsOverlap(appt1, appt2)) {
           // Skip telehealth appointments from conflict detection
