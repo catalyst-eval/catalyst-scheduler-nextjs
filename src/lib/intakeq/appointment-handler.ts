@@ -8,62 +8,63 @@ export class AppointmentHandler {
     private readonly sheetsService: GoogleSheetsService
   ) {}
 
-  async handleAppointment(payload: IntakeQWebhookPayload): Promise<{ success: boolean; error?: string }> {
-    try {
-      if (!payload.Appointment) {
-        throw new Error('No appointment data in payload');
-      }
-
-      console.log('Processing appointment:', {
-        type: payload.EventType,
-        appointmentId: payload.Appointment.Id,
-        clientId: payload.ClientId,
-        startDate: payload.Appointment.StartDateIso,
-        duration: payload.Appointment.Duration,
-        practitionerId: payload.Appointment.PractitionerId
-      });
-
-      switch (payload.EventType) {
-        case 'AppointmentCreated':
-        case 'Appointment Created':
-          return await this.handleNewAppointment(payload.Appointment, payload.ClientId);
-        
-        case 'AppointmentUpdated':
-        case 'Appointment Updated':
-        case 'AppointmentRescheduled':
-        case 'Appointment Rescheduled':
-          return await this.handleAppointmentUpdate(payload.Appointment, payload.ClientId);
-        
-        case 'AppointmentCancelled':
-        case 'Appointment Cancelled':
-        case 'AppointmentCanceled':
-        case 'Appointment Canceled':
-          return await this.handleAppointmentCancellation(payload.Appointment, payload.ClientId);
-        
-        case 'AppointmentDeleted':
-        case 'Appointment Deleted':
-          return await this.handleAppointmentDeletion(payload.Appointment, payload.ClientId);
-        
-        default:
-          throw new Error(`Unsupported appointment event type: ${payload.EventType}`);
-      }
-    } catch (error) {
-      console.error('Error handling appointment:', error);
-      
-      await this.sheetsService.addAuditLog({
-        timestamp: new Date().toISOString(),
-        eventType: AuditEventType.SYSTEM_ERROR,
-        description: `Error processing ${payload.EventType}`,
-        user: 'SYSTEM',
-        systemNotes: error instanceof Error ? error.message : 'Unknown error'
-      });
-
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error occurred'
-      };
+  // src/lib/intakeq/appointment-handler.ts
+async handleAppointment(payload: IntakeQWebhookPayload): Promise<{ success: boolean; error?: string }> {
+  try {
+    if (!payload.Appointment) {
+      throw new Error('No appointment data in payload');
     }
+
+    console.log('Processing appointment:', {
+      type: payload.Type || payload.EventType, // Check both Type and EventType
+      appointmentId: payload.Appointment.Id,
+      clientId: payload.ClientId,
+      startDate: payload.Appointment.StartDateIso,
+      duration: payload.Appointment.Duration,
+      practitionerId: payload.Appointment.PractitionerId
+    });
+
+    switch (payload.Type || payload.EventType) { // Check both Type and EventType
+      case 'AppointmentCreated':
+      case 'Appointment Created':
+        return await this.handleNewAppointment(payload.Appointment, payload.ClientId);
+      
+      case 'AppointmentUpdated':
+      case 'Appointment Updated':
+      case 'AppointmentRescheduled':
+      case 'Appointment Rescheduled':
+        return await this.handleAppointmentUpdate(payload.Appointment, payload.ClientId);
+      
+      case 'AppointmentCancelled':
+      case 'Appointment Cancelled':
+      case 'AppointmentCanceled':
+      case 'Appointment Canceled':
+        return await this.handleAppointmentCancellation(payload.Appointment, payload.ClientId);
+      
+      case 'AppointmentDeleted':
+      case 'Appointment Deleted':
+        return await this.handleAppointmentDeletion(payload.Appointment, payload.ClientId);
+      
+      default:
+        throw new Error(`Unsupported appointment event type: ${payload.Type || payload.EventType}`);
+    }
+  } catch (error) {
+    console.error('Error handling appointment:', error);
+    
+    await this.sheetsService.addAuditLog({
+      timestamp: new Date().toISOString(),
+      eventType: AuditEventType.SYSTEM_ERROR,
+      description: `Error processing ${payload.Type || payload.EventType}`,
+      user: 'SYSTEM',
+      systemNotes: error instanceof Error ? error.message : 'Unknown error'
+    });
+
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error occurred'
+    };
   }
+}
 
   private async handleNewAppointment(appointment: IntakeQAppointment, clientId: string | number): Promise<{ success: boolean; error?: string }> {
     try {

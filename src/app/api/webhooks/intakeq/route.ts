@@ -1,12 +1,9 @@
 // src/app/api/webhooks/intakeq/route.ts
-
 import { NextResponse } from 'next/server';
 import { initializeGoogleSheets } from '@/lib/google/auth';
-import { IntakeQService } from '@/lib/intakeq/service';
 import { AppointmentHandler } from '@/lib/intakeq/appointment-handler';
-import type { WebhookResponse } from '@/types/webhooks';
 
-export async function POST(request: Request): Promise<NextResponse<WebhookResponse>> {
+export async function POST(request: Request) {
   try {
     // Get raw body
     const rawBody = await request.text();
@@ -18,17 +15,11 @@ export async function POST(request: Request): Promise<NextResponse<WebhookRespon
     // Initialize services
     const sheetsService = await initializeGoogleSheets();
     console.log('Sheets service initialized');
-    
-    const intakeQService = new IntakeQService(
-      process.env.INTAKEQ_API_KEY!,
-      sheetsService
-    );
-    console.log('IntakeQ service initialized');
 
     // Parse payload
     const payload = JSON.parse(rawBody);
     console.log('Processing webhook:', {
-      type: payload.EventType,
+      type: payload.Type || payload.EventType,
       clientId: payload.ClientId,
       appointmentId: payload.Appointment?.Id,
       startDate: payload.Appointment?.StartDateIso,
@@ -36,7 +27,7 @@ export async function POST(request: Request): Promise<NextResponse<WebhookRespon
     });
 
     // Handle appointment events
-    if (payload.EventType.startsWith('Appointment')) {
+    if ((payload.Type || payload.EventType)?.startsWith('Appointment')) {
       console.log('Creating appointment handler');
       const handler = new AppointmentHandler(sheetsService);
       console.log('Processing appointment with handler');
@@ -58,7 +49,7 @@ export async function POST(request: Request): Promise<NextResponse<WebhookRespon
     console.error('Webhook error:', error);
     return NextResponse.json({
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error occurred',
+      error: error instanceof Error ? error.message : 'Unknown error',
       timestamp: new Date().toISOString()
     }, { status: 500 });
   }
