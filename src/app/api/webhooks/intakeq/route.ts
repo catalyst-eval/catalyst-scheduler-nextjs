@@ -1,7 +1,11 @@
 // src/app/api/webhooks/intakeq/route.ts
+
 import { NextResponse } from 'next/server';
 import { initializeGoogleSheets } from '@/lib/google/auth';
-import { AppointmentHandler } from '@/lib/intakeq/appointment-handler';
+import { IntakeQService } from '@/lib/intakeq/service';
+import { AppointmentSyncHandler } from '@/lib/intakeq/appointment-sync';
+import { EnhancedWebhookHandler } from '@/lib/intakeq/webhook-handler';
+import { initializeEmailService } from '@/lib/email/config';
 
 export async function POST(request: Request) {
   try {
@@ -9,15 +13,54 @@ export async function POST(request: Request) {
     const rawBody = await request.text();
 
     console.log('Webhook request received:', {
-      bodyLength: rawBody.length
+      bodyLength: rawBody.length,
+      rawContent: rawBody
     });
 
     // Initialize services
     const sheetsService = await initializeGoogleSheets();
     console.log('Sheets service initialized');
 
-    // Parse payload
-    const payload = JSON.parse(rawBody);
+    const intakeQService = new IntakeQService(
+      process.env.INTAKEQ_API_KEY!,
+      sheetsService
+    );
+    console.log('IntakeQ service initialized');
+
+    const emailService = await initializeEmailService(sheetsService);
+    console.log('Email service initialized');
+
+    // Attempt to parse with detailed error logging
+    let payload;
+    try {
+      payload = JSON.parse(rawBody);
+      console.log('Parsed payload:', {
+        type: payload.Type,
+        clientId: payload.ClientId,
+        hasResponses: !!payload.responses
+      });
+    } catch (error) {
+      if (error instanceof Error) {
+        console.error('JSON Parse Error:', {
+          error: error.message,
+          rawData: rawBody.substring(0, 200) + '...'
+        });
+      }
+      throw error;
+    }
+
+    // Initialize handlers with correct service types
+    const appointmentSync = new AppointmentSyncHandler(
+      sheetsService,
+      intakeQService,
+      emailService
+    );
+
+    const webhookHandler = new EnhancedWebhookHandler(
+      sheetsService,
+      appointmentSync
+    );
+
     console.log('Processing webhook:', {
       type: payload.Type || payload.EventType,
       clientId: payload.ClientId,
@@ -26,17 +69,12 @@ export async function POST(request: Request) {
       duration: payload.Appointment?.Duration
     });
 
-    // Handle appointment events
-    if ((payload.Type || payload.EventType)?.startsWith('Appointment')) {
-      console.log('Creating appointment handler');
-      const handler = new AppointmentHandler(sheetsService);
-      console.log('Processing appointment with handler');
-      const result = await handler.handleAppointment(payload);
-      console.log('Handler result:', result);
+    // Process the webhook
+    const result = await webhookHandler.processWebhook(payload);
+    console.log('Webhook processing result:', result);
 
-      if (!result.success) {
-        throw new Error(result.error || 'Failed to process appointment');
-      }
+    if (!result.success) {
+      throw new Error(result.error || 'Failed to process webhook');
     }
 
     console.log('Webhook processed successfully');

@@ -14,7 +14,9 @@ export type WebhookEventType =
   | 'AppointmentCanceled'
   | 'Appointment Canceled'
   | 'AppointmentDeleted'
-  | 'Appointment Deleted';
+  | 'Appointment Deleted'
+  | 'Form Submitted'
+  | 'Intake Submitted';
 
 export interface IntakeQAppointment {
   Id: string;
@@ -59,6 +61,8 @@ export interface IntakeQWebhookPayload {
   Type?: WebhookEventType;  // Keep Type for backward compatibility
   EventType: WebhookEventType; // Make EventType required
   ClientId: number;
+  ClientName: string;
+  ClientEmail: string;
   ExternalClientId?: string;
   PracticeId: string;
   ExternalPracticeId?: string | null;

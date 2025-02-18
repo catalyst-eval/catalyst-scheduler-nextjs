@@ -1,3 +1,172 @@
+/**
+ * @fileoverview Types for the config-array package.
+ * @author Nicholas C. Zakas
+ */
+
+export interface ConfigObject {
+	/**
+	 * The files to include.
+	 */
+	files?: string[];
+
+	/**
+	 * The files to exclude.
+	 */
+	ignores?: string[];
+
+	/**
+	 * The name of the config object.
+	 */
+	name?: string;
+
+	// may also have any number of other properties
+	[key: string]: unknown;
+}
+/**
+ * @fileoverview Types for the config-array package.
+ * @author Nicholas C. Zakas
+ */
+
+export interface ConfigObject {
+	/**
+	 * The files to include.
+	 */
+	files?: string[];
+
+	/**
+	 * The files to exclude.
+	 */
+	ignores?: string[];
+
+	/**
+	 * The name of the config object.
+	 */
+	name?: string;
+
+	// may also have any number of other properties
+	[key: string]: unknown;
+}
+/**
+ * @fileoverview Types for object-schema package.
+ */
+
+/**
+ * Built-in validation strategies.
+ */
+export type BuiltInValidationStrategy =
+	| "array"
+	| "boolean"
+	| "number"
+	| "object"
+	| "object?"
+	| "string"
+	| "string!";
+
+/**
+ * Built-in merge strategies.
+ */
+export type BuiltInMergeStrategy = "assign" | "overwrite" | "replace";
+
+/**
+ * Property definition.
+ */
+export interface PropertyDefinition {
+	/**
+	 * Indicates if the property is required.
+	 */
+	required: boolean;
+
+	/**
+	 * The other properties that must be present when this property is used.
+	 */
+	requires?: string[];
+
+	/**
+	 * The strategy to merge the property.
+	 */
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any -- https://github.com/eslint/rewrite/pull/90#discussion_r1687206213
+	merge: BuiltInMergeStrategy | ((target: any, source: any) => any);
+
+	/**
+	 * The strategy to validate the property.
+	 */
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any -- https://github.com/eslint/rewrite/pull/90#discussion_r1687206213
+	validate: BuiltInValidationStrategy | ((value: any) => void);
+
+	/**
+	 * The schema for the object value of this property.
+	 */
+	schema?: ObjectDefinition;
+}
+
+/**
+ * Object definition.
+ */
+export type ObjectDefinition = Record<string, PropertyDefinition>;
+/**
+ * @fileoverview Types for object-schema package.
+ */
+
+/**
+ * Built-in validation strategies.
+ */
+export type BuiltInValidationStrategy =
+	| "array"
+	| "boolean"
+	| "number"
+	| "object"
+	| "object?"
+	| "string"
+	| "string!";
+
+/**
+ * Built-in merge strategies.
+ */
+export type BuiltInMergeStrategy = "assign" | "overwrite" | "replace";
+
+/**
+ * Property definition.
+ */
+export interface PropertyDefinition {
+	/**
+	 * Indicates if the property is required.
+	 */
+	required: boolean;
+
+	/**
+	 * The other properties that must be present when this property is used.
+	 */
+	requires?: string[];
+
+	/**
+	 * The strategy to merge the property.
+	 */
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any -- https://github.com/eslint/rewrite/pull/90#discussion_r1687206213
+	merge: BuiltInMergeStrategy | ((target: any, source: any) => any);
+
+	/**
+	 * The strategy to validate the property.
+	 */
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any -- https://github.com/eslint/rewrite/pull/90#discussion_r1687206213
+	validate: BuiltInValidationStrategy | ((value: any) => void);
+
+	/**
+	 * The schema for the object value of this property.
+	 */
+	schema?: ObjectDefinition;
+}
+
+/**
+ * Object definition.
+ */
+export type ObjectDefinition = Record<string, PropertyDefinition>;
+/**
+ * @fileoverview Types for the plugin-kit package.
+ * @author Nicholas C. Zakas
+ */
+
+export type StringConfig = Record<string, string | null>;
+export type BooleanConfig = Record<string, boolean>;
 // src/types/webhooks.ts
 
 export type WebhookEventType = 
@@ -185,93 +354,23 @@ export interface ValidationResult {
   isValid: boolean;
   conflicts?: string[];
   error?: string;
-}// src/types/intakeq.ts
+}// src/lib/types.ts
 
-// Interface for appointments from IntakeQ
-export interface IntakeQAppointment {
-    Id: string;
-    ClientName: string;
-    ClientEmail: string;
-    ClientPhone: string;
-    ClientDateOfBirth: string;
-    ClientId: number;
-    Status: string;
-    StartDate: number;
-    EndDate: number;
-    Duration: number;
-    ServiceName: string;
-    ServiceId: string;
-    LocationName: string;
-    LocationId: string;
-    Price: number;
-    PractitionerName: string;
-    PractitionerEmail: string;
-    PractitionerId: string;
-    IntakeId: string | null;
-    DateCreated: number;
-    CreatedBy: string;
-    BookedByClient: boolean;
-    ExternalClientId?: string;
-    StartDateIso: string;
-    EndDateIso: string;
-    StartDateLocal: string;
-    EndDateLocal: string;
-    StartDateLocalFormatted: string;
-}
-
-// Interface for office assignment requests
-export interface AssignmentRequest {
-    appointment: IntakeQAppointment;
-    clientPreferences?: {
-        mobilityNeeds: string[];
-        sensoryPreferences: string[];
-        physicalNeeds: string[];
-        roomConsistency: number;
-        supportNeeds: string[];
-    };
-    requirements?: {
-        accessibility?: boolean;
-        specialFeatures?: string[];
-    };
-}
-
-// Interface for office assignment results
-export interface AssignmentResult {
-    success: boolean;
-    appointmentId: string;
-    officeId?: string;
-    error?: string;
+export interface SheetOffice {
+    officeId: string;
+    name: string;
+    unit: string;
+    inService: boolean;     // New field
+    floor: 'upstairs' | 'downstairs';
+    isAccessible: boolean;
+    size: 'small' | 'medium' | 'large';
+    ageGroups: string[];
+    specialFeatures: string[];
+    primaryClinician?: string;
+    alternativeClinicians?: string[];
+    isFlexSpace: boolean;
     notes?: string;
-    evaluationLog?: string[];
-}
-
-// Interface for webhook payload from IntakeQ
-export interface IntakeQWebhookPayload {
-    IntakeId?: string;
-    Type: 'Intake Submitted' | 'Appointment Created' | 'Appointment Updated';
-    ClientId: number;
-    ExternalClientId?: string;
-    PracticeId: string;
-    ExternalPracticeId?: string | null;
-    formId?: string;
-    responses?: Record<string, any>;
-    Appointment?: IntakeQAppointment;
-    ActionPerformedByClient?: boolean;
-}
-
-// Interface for notifications about office assignments
-export interface AssignmentNotification {
-    type: 'assignment' | 'reassignment' | 'error';
-    appointmentId: string;
-    officeId?: string;
-    clinicianEmail: string;
-    message: string;
-    changes?: {
-        previousOffice?: string;
-        newOffice?: string;
-        reason?: string;
-    };
-}// src/types/sheets.ts
+  }// src/types/sheets.ts
 
 export interface SheetOffice {
   officeId: string;
@@ -1656,959 +1755,7 @@ async deleteAppointment(appointmentId: string): Promise<void> {
     clearCache(): void {
       this.cache.clearAll();
     }
-  }// src/lib/intakeq/appointment-sync.ts
-
-import type { 
-  IntakeQAppointment, 
-  IntakeQWebhookPayload,
-  WebhookResponse 
-} from '@/types/webhooks';
-import type { GoogleSheetsService } from '@/lib/google/sheets';
-import type { EmailService } from '@/lib/email/service';
-import type { IntakeQService } from './service';
-import type { 
-  SchedulingRequest,
-  AppointmentRecord,
-  SessionType,
-  AlertSeverity
-} from '@/types/scheduling';
-import type { 
-  ValidationResponse, 
-  AppointmentConflict,
-  ApiResponse
-} from '@/types/api';
-import type { ClientPreference } from '@/types/sheets';
-import { AuditEventType } from '@/lib/google/sheets';
-import { OfficeAssignmentService } from '../scheduling/office-assignment';
-import { EmailTemplates } from '../email/templates';
-import { RecipientManagementService } from '@/lib/email/recipients';
-import { 
-  transformIntakeQAppointment, 
-  determineSessionType,
-  EmailPriority
-} from '../transformations/appointment-types';
-
-export class AppointmentSyncHandler {
-  private readonly recipientService: RecipientManagementService;
-
-  constructor(
-    private readonly sheetsService: GoogleSheetsService,
-    private readonly intakeQService: IntakeQService,
-    private readonly emailService: EmailService
-  ) {
-    this.recipientService = new RecipientManagementService(sheetsService);
-  }
-
-  /**
-   * Process appointment webhook events
-   */
-  async processAppointmentEvent(
-    payload: IntakeQWebhookPayload
-  ): Promise<WebhookResponse> {
-    if (!payload.Appointment) {
-      return { 
-        success: false, 
-        error: 'Missing appointment data' 
-      };
-    }
-
-    try {
-      // Log webhook receipt
-      await this.sheetsService.addAuditLog({
-        timestamp: new Date().toISOString(),
-        eventType: AuditEventType.WEBHOOK_RECEIVED,
-        description: `Received ${payload.Type} webhook`,
-        user: 'INTAKEQ_WEBHOOK',
-        systemNotes: JSON.stringify({
-          appointmentId: payload.Appointment.Id,
-          type: payload.Type,
-          clientId: payload.ClientId
-        })
-      });
-
-      switch (payload.Type) {
-        case 'AppointmentCreated':
-        case 'Appointment Created':
-          if (payload.Appointment.RecurrencePattern) {
-            return await this.handleRecurringAppointment(
-              payload.Appointment,
-              payload.Appointment.RecurrencePattern
-            );
-          }
-          return await this.handleNewAppointment(payload.Appointment);
-        
-        case 'AppointmentUpdated':
-        case 'Appointment Updated':
-        case 'AppointmentRescheduled':
-        case 'Appointment Rescheduled':
-          return await this.handleAppointmentUpdate(payload.Appointment);
-          
-        case 'AppointmentCancelled':
-        case 'Appointment Cancelled':
-          return await this.handleAppointmentCancellation(payload.Appointment);
-          
-        default:
-          return {
-            success: false,
-            error: `Unsupported event type: ${payload.Type}`
-          };
-      }
-    } catch (error) {
-      console.error('Appointment processing error:', error);
-      
-      // Log the error
-      await this.sheetsService.addAuditLog({
-        timestamp: new Date().toISOString(),
-        eventType: AuditEventType.SYSTEM_ERROR,
-        description: `Error processing appointment ${payload.Appointment.Id}`,
-        user: 'SYSTEM',
-        systemNotes: error instanceof Error ? error.message : 'Unknown error'
-      });
-
-      return {
-        success: false,
-        error: 'Appointment processing failed'
-      };
-    }
-  }
-
-  private async handleNewAppointment(
-    appointment: IntakeQAppointment
-  ): Promise<WebhookResponse> {
-    try {
-      // Convert to scheduling request format
-      const request = await this.convertToSchedulingRequest(appointment);
-      
-      // Validate scheduling
-      const validationResult = await this.validateScheduleInRealTime(request);
-      if (!validationResult.isValid) {
-        return {
-          success: false,
-          error: `Scheduling validation failed: ${validationResult.conflicts.map(c => c.description).join(', ')}`,
-          details: {
-            appointmentId: appointment.Id,
-            action: 'validation-failed',
-            conflicts: validationResult.conflicts
-          }
-        };
-      }
-
-      // Find optimal office
-      const [offices, rules, clinicians] = await Promise.all([
-        this.sheetsService.getOffices(),
-        this.sheetsService.getAssignmentRules(),
-        this.sheetsService.getClinicians()
-      ]);
-
-      const clientPreference = await this.getClientPreference(appointment.ClientId.toString());
-      
-      const assignmentService = new OfficeAssignmentService(
-        offices,
-        rules,
-        clinicians,
-        clientPreference
-      );
-
-      const assignmentResult = await assignmentService.findOptimalOffice(request);
-      
-      if (!assignmentResult.success) {
-        throw new Error(assignmentResult.error || 'Failed to find suitable office');
-      }
-
-      // Log the assignment
-      await this.sheetsService.addAuditLog({
-        timestamp: new Date().toISOString(),
-        eventType: AuditEventType.APPOINTMENT_CREATED,
-        description: `Assigned office ${assignmentResult.officeId} for appointment ${appointment.Id}`,
-        user: 'SYSTEM',
-        systemNotes: JSON.stringify({
-          appointmentId: appointment.Id,
-          officeId: assignmentResult.officeId,
-          clientId: appointment.ClientId
-        })
-      });
-
-      // Send notifications
-      await this.sendNotifications({
-        type: 'new',
-        appointment,
-        officeId: assignmentResult.officeId!
-      });
-
-      return {
-        success: true,
-        details: {
-          appointmentId: appointment.Id,
-          officeId: assignmentResult.officeId,
-          action: 'created'
-        }
-      };
-    } catch (error) {
-      console.error('Error handling new appointment:', error);
-      throw error;
-    }
-  }
-
-  private async handleAppointmentUpdate(
-    appointment: IntakeQAppointment
-  ): Promise<WebhookResponse> {
-    try {
-      const request = await this.convertToSchedulingRequest(appointment);
-      
-      // Validate scheduling
-      const validationResult = await this.validateScheduleInRealTime(request);
-      if (!validationResult.isValid) {
-        return {
-          success: false,
-          error: `Scheduling validation failed: ${validationResult.conflicts.map(c => c.description).join(', ')}`,
-          details: {
-            appointmentId: appointment.Id,
-            action: 'validation-failed',
-            conflicts: validationResult.conflicts
-          }
-        };
-      }
-
-      // Find optimal office for updated appointment
-      const [offices, rules, clinicians] = await Promise.all([
-        this.sheetsService.getOffices(),
-        this.sheetsService.getAssignmentRules(),
-        this.sheetsService.getClinicians()
-      ]);
-
-      const clientPreference = await this.getClientPreference(appointment.ClientId.toString());
-      
-      const assignmentService = new OfficeAssignmentService(
-        offices,
-        rules,
-        clinicians,
-        clientPreference
-      );
-
-      const assignmentResult = await assignmentService.findOptimalOffice(request);
-      
-      if (!assignmentResult.success) {
-        throw new Error(assignmentResult.error || 'Failed to find suitable office');
-      }
-
-      // Log the update
-      await this.sheetsService.addAuditLog({
-        timestamp: new Date().toISOString(),
-        eventType: AuditEventType.APPOINTMENT_UPDATED,
-        description: `Updated office assignment for appointment ${appointment.Id}`,
-        user: 'SYSTEM',
-        newValue: JSON.stringify({
-          appointmentId: appointment.Id,
-          officeId: assignmentResult.officeId,
-          clientId: appointment.ClientId
-        })
-      });
-
-      // Send notifications
-      await this.sendNotifications({
-        type: 'update',
-        appointment,
-        officeId: assignmentResult.officeId!
-      });
-
-      return {
-        success: true,
-        details: {
-          appointmentId: appointment.Id,
-          officeId: assignmentResult.officeId,
-          action: 'updated'
-        }
-      };
-    } catch (error) {
-      console.error('Error handling appointment update:', error);
-      throw error;
-    }
-  }
-
-  private async handleAppointmentCancellation(
-    appointment: IntakeQAppointment
-  ): Promise<WebhookResponse> {
-    try {
-      // Log cancellation
-      await this.sheetsService.addAuditLog({
-        timestamp: new Date().toISOString(),
-        eventType: AuditEventType.APPOINTMENT_CANCELLED,
-        description: `Cancelled appointment ${appointment.Id}`,
-        user: 'SYSTEM',
-        systemNotes: JSON.stringify({
-          appointmentId: appointment.Id,
-          clientId: appointment.ClientId,
-          reason: appointment.CancellationReason || 'No reason provided'
-        })
-      });
-
-      // Send notifications
-      await this.sendNotifications({
-        type: 'cancellation',
-        appointment
-      });
-
-      return {
-        success: true,
-        details: {
-          appointmentId: appointment.Id,
-          action: 'cancelled'
-        }
-      };
-    } catch (error) {
-      console.error('Error handling appointment cancellation:', error);
-      throw error;
-    }
-  }
-
-  private async handleRecurringAppointment(
-    appointment: IntakeQAppointment,
-    recurrencePattern: {
-      frequency: 'weekly' | 'biweekly' | 'monthly';
-      occurrences: number;
-      endDate?: string;
-    }
-  ): Promise<WebhookResponse> {
-    try {
-      let currentDate = new Date(appointment.StartDateIso);
-      const endDate = recurrencePattern.endDate 
-        ? new Date(recurrencePattern.endDate)
-        : null;
-      
-      let occurrenceCount = 0;
-      const results: WebhookResponse[] = [];
-      
-      while (
-        occurrenceCount < recurrencePattern.occurrences && 
-        (!endDate || currentDate <= endDate)
-      ) {
-        // Create appointment instance
-        const instanceDate = new Date(currentDate);
-        const appointmentInstance = {
-          ...appointment,
-          Id: `${appointment.Id}-${occurrenceCount + 1}`,
-          StartDateIso: instanceDate.toISOString(),
-          EndDateIso: new Date(
-            instanceDate.getTime() + (appointment.Duration * 60000)
-          ).toISOString()
-        };
-
-        // Process individual instance
-        const result = await this.handleNewAppointment(appointmentInstance);
-        results.push(result);
-
-        if (!result.success) {
-          break;
-        }
-
-        // Advance to next occurrence
-        switch (recurrencePattern.frequency) {
-          case 'weekly':
-            currentDate.setDate(currentDate.getDate() + 7);
-            break;
-          case 'biweekly':
-            currentDate.setDate(currentDate.getDate() + 14);
-            break;
-          case 'monthly':
-            currentDate.setMonth(currentDate.getMonth() + 1);
-            break;
-        }
-
-        occurrenceCount++;
-      }
-
-      const failedResults = results.filter(r => !r.success);
-      
-      if (failedResults.length > 0) {
-        return {
-          success: false,
-          error: 'Some recurring appointments failed to schedule',
-          details: {
-            appointmentId: appointment.Id,
-            action: 'recurring-partial',
-            successful: results.length - failedResults.length,
-            failed: failedResults.length,
-            failures: failedResults
-          }
-        };
-      }
-
-      return {
-        success: true,
-        details: {
-          appointmentId: appointment.Id,
-          action: 'recurring-created',
-          occurrences: results.length
-        }
-      };
-    } catch (error) {
-      console.error('Error handling recurring appointment:', error);
-      throw error;
-    }
-  }
-
-  // Part of appointment-sync.ts
-
-// Part of appointment-sync.ts
-
-private async sendNotifications(options: {
-  type: 'new' | 'update' | 'cancellation';
-  appointment: IntakeQAppointment;
-  officeId?: string;
-}): Promise<void> {
-  const { type, appointment, officeId } = options;
-
-  // Get recipients based on notification type
-  const recipients = await this.emailService.getClinicianRecipients();
-
-  // Transform the appointment
-  const transformedAppointment = transformIntakeQAppointment(appointment);
-
-  // Create appropriate template
-  const template = EmailTemplates.dailySchedule({
-    date: new Date(appointment.StartDateIso).toISOString().split('T')[0],
-    appointments: [transformedAppointment],
-    conflicts: [],
-    officeUtilization: new Map([
-      [officeId || '', {
-        totalSlots: 8, // Default to 8 hour day
-        bookedSlots: 1,
-        specialNotes: []
-      }]
-    ]),
-    alerts: [{
-      type: 'appointment',
-      message: `${type} appointment: ${appointment.ClientName}`,
-      severity: type === 'new' ? 'low' : 'high'
-    }]
-  });
-}
-
-  public async validateScheduleInRealTime(
-    request: SchedulingRequest
-  ): Promise<ValidationResponse> {
-    try {
-      // Get existing appointments for the date from IntakeQ
-      const requestDate = new Date(request.dateTime);
-      const startOfDay = new Date(requestDate);
-      startOfDay.setHours(0, 0, 0, 0);
-      const endOfDay = new Date(requestDate);
-      endOfDay.setHours(23, 59, 59, 999);
-
-      const existingAppointments = await this.intakeQService.getAppointments(
-        startOfDay.toISOString(),
-        endOfDay.toISOString()
-      );
-
-      const conflicts: AppointmentConflict[] = [];
-
-      // Check clinician availability
-      const clinicianBookings = existingAppointments.filter(
-        booking => booking.PractitionerId === request.clinicianId
-      );
-
-      const requestStart = new Date(request.dateTime);
-      const requestEnd = new Date(
-        requestStart.getTime() + (request.duration * 60000)
-      );
-
-      // Check for conflicts
-      for (const booking of clinicianBookings) {
-        const bookingStart = new Date(booking.StartDateIso);
-        const bookingEnd = new Date(booking.EndDateIso);
-
-        if (requestStart < bookingEnd && requestEnd > bookingStart) {
-          conflicts.push({
-            type: 'double-booking',
-            description: 'Clinician is already booked during this time',
-            severity: 'high',
-            appointmentIds: [booking.Id]
-          });
-        }
-      }
-
-      return {
-        isValid: conflicts.length === 0,
-        conflicts
-      };
-    } catch (error) {
-      console.error('Validation error:', error);
-      throw error;
-    }
-  }
-
-  private async getClientPreference(
-    clientId: string
-  ): Promise<ClientPreference | undefined> {
-    const preferences = await this.sheetsService.getClientPreferences();
-    return preferences.find(pref => pref.clientId === clientId);
-  }
-
-  private async convertToSchedulingRequest(
-    appointment: IntakeQAppointment
-  ): Promise<SchedulingRequest> {
-    try {
-      // Find clinician by IntakeQ ID
-      const clinicians = await this.sheetsService.getClinicians();
-      const clinician = clinicians.find(c => 
-        c.intakeQPractitionerId === appointment.PractitionerId
-      );
-
-      if (!clinician) {
-        throw new Error(`No clinician found for IntakeQ ID: ${appointment.PractitionerId}`);
-      }
-
-      // Get client preferences to determine requirements
-      const clientPrefs = await this.getClientPreference(appointment.ClientId.toString());
-      
-      // Set base requirements from client preferences
-      const mobilityNeeds = clientPrefs?.mobilityNeeds || [];
-      const sensoryPrefs = clientPrefs?.sensoryPreferences || [];
-      const physicalNeeds = clientPrefs?.physicalNeeds || [];
-
-      const requirements = {
-        accessibility: Array.isArray(mobilityNeeds) && mobilityNeeds.length > 0,
-        specialFeatures: [
-          ...(Array.isArray(sensoryPrefs) ? sensoryPrefs : []),
-          ...(Array.isArray(physicalNeeds) ? physicalNeeds : [])
-        ],
-        roomPreference: clientPrefs?.assignedOffice || undefined
-      };
-
-      return {
-        clientId: appointment.ClientId.toString(),
-        clinicianId: clinician.clinicianId,
-        dateTime: appointment.StartDateIso,
-        duration: appointment.Duration,
-        sessionType: this.determineSessionType(appointment),
-        requirements
-      };
-    } catch (error) {
-      // Log conversion error
-      await this.sheetsService.addAuditLog({
-        timestamp: new Date().toISOString(),
-        eventType: AuditEventType.SYSTEM_ERROR,
-        description: `Error converting IntakeQ appointment ${appointment.Id}`,
-        user: 'SYSTEM',
-        systemNotes: error instanceof Error ? error.message : 'Unknown error'
-      });
-      throw error;
-    }
-  }
-
-  private determineSessionType(
-    appointment: IntakeQAppointment
-  ): 'in-person' | 'telehealth' | 'group' | 'family' {
-    const serviceName = appointment.ServiceName.toLowerCase();
-    
-    // Map commonly used telehealth terms
-    if (serviceName.match(/tele(health|therapy|med|session)|virtual|remote|video/)) {
-      return 'telehealth';
-    }
-  
-    // Map group therapy variations
-    if (serviceName.match(/group|workshop|class|seminar/)) {
-      return 'group';
-    }
-  
-    // Map family therapy variations
-    if (serviceName.match(/family|couples|relationship|parental|parent-child/)) {
-      return 'family';
-    }
-  
-    // Check service metadata if available
-    if (appointment.ServiceId) {
-      // Store common service IDs for quick lookup
-      const TELEHEALTH_SERVICES = ['64a319db9173cb32157ea065', '64a319db9173cb32157ea066'];
-      const GROUP_SERVICES = ['64a319db9173cb32157ea067'];
-      const FAMILY_SERVICES = ['64a319db9173cb32157ea068'];
-  
-      if (TELEHEALTH_SERVICES.includes(appointment.ServiceId)) {
-        return 'telehealth';
-      }
-      if (GROUP_SERVICES.includes(appointment.ServiceId)) {
-        return 'group';
-      }
-      if (FAMILY_SERVICES.includes(appointment.ServiceId)) {
-        return 'family';
-      }
-    }
-  
-    // Default to in-person if no other matches
-    return 'in-person';
-  }
-}// src/lib/intakeq/webhook-handler.ts
-
-import type { IntakeQWebhookPayload, WebhookEventType } from '@/types/webhooks';
-import type { GoogleSheetsService } from '@/lib/google/sheets';
-import { AppointmentSyncHandler } from './appointment-sync';
-import { AuditEventType } from '@/lib/google/sheets';
-
-interface WebhookProcessingResult {
-  success: boolean;
-  error?: string;
-  retryable?: boolean;
-  details?: any;
-}
-
-export class EnhancedWebhookHandler {
-  private readonly MAX_RETRIES = 3;
-  private readonly RETRY_DELAYS = [1000, 5000, 15000]; // Delays in milliseconds
-
-  constructor(
-    private readonly sheetsService: GoogleSheetsService,
-    private readonly appointmentSync: AppointmentSyncHandler
-  ) {}
-
-  /**
-   * Get event type from payload, handling both field names
-   */
-  private getEventType(payload: Partial<IntakeQWebhookPayload>): WebhookEventType | undefined {
-    // Use EventType if available, fall back to Type
-    return payload.EventType || payload.Type;
-  }
-
-  /**
-   * Process incoming webhook with validation and retries
-   */
-  async processWebhook(
-    payload: unknown,
-    signature?: string
-  ): Promise<WebhookProcessingResult> {
-    try {
-      // Validate webhook payload
-      const validationResult = this.validateWebhook(payload, signature);
-      if (!validationResult.isValid) {
-        await this.logWebhookError('VALIDATION_ERROR', validationResult.error || 'Unknown validation error', payload);
-        return {
-          success: false,
-          error: validationResult.error,
-          retryable: false
-        };
-      }
-
-      const typedPayload = payload as IntakeQWebhookPayload;
-
-      // Log webhook receipt
-      await this.sheetsService.addAuditLog({
-        timestamp: new Date().toISOString(),
-        eventType: AuditEventType.WEBHOOK_RECEIVED,
-        description: `Received ${typedPayload.Type} webhook`,
-        user: 'INTAKEQ_WEBHOOK',
-        systemNotes: JSON.stringify({
-          type: typedPayload.Type,
-          clientId: typedPayload.ClientId
-        })
-      });
-
-      // Process with retry logic
-      return await this.processWithRetry(typedPayload);
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      await this.logWebhookError('PROCESSING_ERROR', errorMessage, payload);
-      
-      return {
-        success: false,
-        error: errorMessage,
-        retryable: this.isRetryableError(error)
-      };
-    }
-  }
-
-  /**
-   * Validate webhook payload and signature
-   */
-  private validateWebhook(
-    payload: unknown,
-    signature?: string
-  ): { isValid: boolean; error?: string } {
-    // Basic payload validation
-    if (!payload || typeof payload !== 'object') {
-      return { isValid: false, error: 'Invalid payload format' };
-    }
-
-    const typedPayload = payload as Partial<IntakeQWebhookPayload>;
-
-    // Required fields validation - check both Type and EventType
-    const eventType = this.getEventType(typedPayload);
-    if (!typedPayload.Type && !typedPayload.EventType) {
-      return { isValid: false, error: 'Missing event type field' };
-    }
-    if (!typedPayload.ClientId) {
-      return { isValid: false, error: 'Missing ClientId field' };
-    }
-
-    // Type-specific validation
-    if (typedPayload.Type === 'Appointment Created' || 
-        typedPayload.Type === 'Appointment Updated') {
-      if (!typedPayload.Appointment) {
-        return { isValid: false, error: 'Missing appointment data' };
-      }
-
-      // Validate appointment fields
-      const appointment = typedPayload.Appointment;
-      if (!appointment.Id || !appointment.StartDateIso || !appointment.EndDateIso) {
-        return { isValid: false, error: 'Invalid appointment data' };
-      }
-    }
-
-    // Signature validation if provided
-    if (signature && !this.validateSignature(payload, signature)) {
-      return { isValid: false, error: 'Invalid signature' };
-    }
-
-    return { isValid: true };
-  }
-
-  /**
-   * Process webhook with retry logic
-   */
-  private async processWithRetry(
-    payload: IntakeQWebhookPayload,
-    attempt: number = 0
-  ): Promise<WebhookProcessingResult> {
-    try {
-      let result: WebhookProcessingResult;
-  
-      const eventType = this.getEventType(payload);
-      console.log('Processing event type:', eventType);
-
-      switch (eventType) {
-        case 'Appointment Created':
-        case 'Appointment Updated':
-        case 'AppointmentCreated':
-        case 'AppointmentUpdated':
-          result = await this.appointmentSync.processAppointmentEvent(payload);
-          break;
-
-        case 'Form Submitted':
-        case 'Intake Submitted':
-          result = await this.handleIntakeSubmission(payload);
-          break;
-
-        default:
-          console.log('Unhandled event type:', {
-            receivedType: eventType,
-            payloadType: payload.Type,
-            expectedTypes: [
-              'Appointment Created',
-              'Appointment Updated',
-              'Form Submitted',
-              'Intake Submitted'
-            ]
-          });
-          return {
-            success: false,
-            error: `Unsupported webhook type: ${payload.Type}`,
-            retryable: false
-          };
-      }
-
-      if (!result.success && result.retryable && attempt < this.MAX_RETRIES) {
-        // Log retry attempt
-        await this.sheetsService.addAuditLog({
-          timestamp: new Date().toISOString(),
-          eventType: AuditEventType.WEBHOOK_RECEIVED,
-          description: `Retry attempt ${attempt + 1} for ${payload.Type}`,
-          user: 'SYSTEM',
-          systemNotes: JSON.stringify({
-            attempt: attempt + 1,
-            type: payload.Type,
-            clientId: payload.ClientId
-          })
-        });
-        
-        // Wait for delay
-        await new Promise(resolve => setTimeout(resolve, this.RETRY_DELAYS[attempt]));
-        
-        // Retry processing
-        return this.processWithRetry(payload, attempt + 1);
-      }
-
-      return result;
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      
-      // Log error
-      await this.logWebhookError(
-        'RETRY_ERROR',
-        `Error on attempt ${attempt + 1}: ${errorMessage}`,
-        payload
-      );
-
-      // Determine if another retry should be attempted
-      if (this.isRetryableError(error) && attempt < this.MAX_RETRIES) {
-        await new Promise(resolve => setTimeout(resolve, this.RETRY_DELAYS[attempt]));
-        return this.processWithRetry(payload, attempt + 1);
-      }
-
-      return {
-        success: false,
-        error: errorMessage,
-        retryable: false
-      };
-    }
-  }
-
-  /**
-   * Handle intake form submission
-   */
-  private async handleIntakeSubmission(
-    payload: IntakeQWebhookPayload
-  ): Promise<WebhookProcessingResult> {
-    try {
-      // Log initial receipt of form
-      await this.sheetsService.addAuditLog({
-        timestamp: new Date().toISOString(),
-        eventType: AuditEventType.WEBHOOK_RECEIVED,
-        description: `Processing intake form ${payload.formId}`,
-        user: 'INTAKEQ_WEBHOOK',
-        systemNotes: JSON.stringify({
-          formId: payload.formId,
-          clientId: payload.ClientId,
-          isFullIntake: !!payload.IntakeId
-        })
-      });
-  
-      // Ensure we have responses to process
-      if (!payload.responses) {
-        return {
-          success: false,
-          error: 'No form responses provided',
-          retryable: false
-        };
-      }
-  
-      // Process responses based on form type
-      const formResponses: Record<string, any> = payload.IntakeId ? 
-        this.extractAccessibilitySection(payload.responses) : 
-        payload.responses;
-  
-      // Validate processed responses
-      if (Object.keys(formResponses).length === 0) {
-        return {
-          success: false,
-          error: 'No valid accessibility responses found',
-          retryable: false
-        };
-      }
-  
-      // Process form data
-      await this.sheetsService.processAccessibilityForm({
-        clientId: payload.ClientId.toString(),
-        clientName: payload.ClientName,
-        clientEmail: payload.ClientEmail,
-        formResponses: formResponses
-      });
-  
-      // Return success response
-      return {
-        success: true,
-        details: {
-          formId: payload.formId,
-          clientId: payload.ClientId,
-          type: payload.IntakeId ? 'full-intake' : 'accessibility-form',
-          source: payload.IntakeId ? 'embedded' : 'standalone'
-        }
-      };
-  
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      await this.logWebhookError('FORM_PROCESSING_ERROR', errorMessage, payload);
-      
-      return {
-        success: false,
-        error: errorMessage,
-        retryable: this.isRetryableError(error)
-      };
-    }
-  }
-
-  /**
-   * Determine if an error is retryable
-   */
-  private isRetryableError(error: unknown): boolean {
-    if (error instanceof Error) {
-      // Network errors are typically retryable
-      if (error.message.includes('network') || error.message.includes('timeout')) {
-        return true;
-      }
-
-      // API rate limiting errors are retryable
-      if (error.message.includes('rate limit') || error.message.includes('429')) {
-        return true;
-      }
-
-      // Temporary service errors are retryable
-      if (error.message.includes('503') || error.message.includes('temporary')) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  /**
-   * Validate webhook signature
-   */
-  private validateSignature(payload: unknown, signature: string): boolean {
-    // Implement signature validation logic here
-    // This would typically involve HMAC verification
-    return true; // Placeholder
-  }
-
-  /**
-   * Log webhook error
-   */
-  private async logWebhookError(
-    errorType: string,
-    message: string,
-    payload: unknown
-  ): Promise<void> {
-    await this.sheetsService.addAuditLog({
-      timestamp: new Date().toISOString(),
-      eventType: AuditEventType.SYSTEM_ERROR,
-      description: `Webhook ${errorType}: ${message}`,
-      user: 'SYSTEM',
-      systemNotes: JSON.stringify({
-        errorType,
-        payload,
-        timestamp: new Date().toISOString()
-      })
-    });
-  }
-
-  /**
-   * Log retry attempt
-   */
-  private extractAccessibilitySection(responses: Record<string, any>): Record<string, any> {
-    // Map the accessibility questions from the full intake form
-    const accessibilityResponses: Record<string, any> = {};
-    
-    // Define accessibility question mappings
-    const questionMappings = {
-      'Do you use any mobility devices?': 'mobility_devices',
-      'Access needs related to mobility/disability (Please specify)': 'mobility_other',
-      'Do you experience sensory sensitivities?': 'sensory_sensitivities',
-      'Other (Please specify):': 'sensory_other',
-      'Do you experience challenges with physical environment?': 'physical_environment',
-      'Please indicate your comfort level with this possibility:': 'room_consistency',
-      'Do you have support needs that involve any of the following?': 'support_needs',
-      'Is there anything else we should know about your space or accessibility needs?': 'additional_notes'
-    };
-  
-    // Extract relevant responses
-    for (const [question, key] of Object.entries(questionMappings)) {
-      if (responses[question] !== undefined) {
-        accessibilityResponses[question] = responses[question];
-      }
-    }
-  
-    console.log('Extracted accessibility responses:', accessibilityResponses);
-    
-    return accessibilityResponses;
-  }
-}// src/lib/intakeq/service.ts
+  }// src/lib/intakeq/service.ts
 
 import type { IntakeQAppointment } from '@/types/webhooks';
 import { GoogleSheetsService, AuditEventType } from '@/lib/google/sheets';

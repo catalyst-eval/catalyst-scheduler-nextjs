@@ -130,22 +130,34 @@ export class EnhancedWebhookHandler {
   ): Promise<WebhookProcessingResult> {
     try {
       let result: WebhookProcessingResult;
-
+  
       const eventType = this.getEventType(payload);
-switch (eventType) {
-  case 'Appointment Created':
-  case 'Appointment Updated':
-  case 'AppointmentCreated':
-  case 'AppointmentUpdated':
-    result = await this.appointmentSync.processAppointmentEvent(payload);
-    break;
+      console.log('Processing event type:', eventType);
 
+      switch (eventType) {
+        case 'Appointment Created':
+        case 'Appointment Updated':
+        case 'AppointmentCreated':
+        case 'AppointmentUpdated':
+          result = await this.appointmentSync.processAppointmentEvent(payload);
+          break;
+
+        case 'Form Submitted':
         case 'Intake Submitted':
-          // Handle intake form submission
           result = await this.handleIntakeSubmission(payload);
           break;
 
         default:
+          console.log('Unhandled event type:', {
+            receivedType: eventType,
+            payloadType: payload.Type,
+            expectedTypes: [
+              'Appointment Created',
+              'Appointment Updated',
+              'Form Submitted',
+              'Intake Submitted'
+            ]
+          });
           return {
             success: false,
             error: `Unsupported webhook type: ${payload.Type}`,
@@ -155,7 +167,17 @@ switch (eventType) {
 
       if (!result.success && result.retryable && attempt < this.MAX_RETRIES) {
         // Log retry attempt
-        await this.logRetryAttempt(payload, attempt);
+        await this.sheetsService.addAuditLog({
+          timestamp: new Date().toISOString(),
+          eventType: AuditEventType.WEBHOOK_RECEIVED,
+          description: `Retry attempt ${attempt + 1} for ${payload.Type}`,
+          user: 'SYSTEM',
+          systemNotes: JSON.stringify({
+            attempt: attempt + 1,
+            type: payload.Type,
+            clientId: payload.ClientId
+          })
+        });
         
         // Wait for delay
         await new Promise(resolve => setTimeout(resolve, this.RETRY_DELAYS[attempt]));
@@ -196,16 +218,7 @@ switch (eventType) {
     payload: IntakeQWebhookPayload
   ): Promise<WebhookProcessingResult> {
     try {
-      // Process form responses
-      if (!payload.formId || !payload.responses) {
-        return {
-          success: false,
-          error: 'Missing form data',
-          retryable: false
-        };
-      }
-
-      // Log form submission
+      // Log initial receipt of form
       await this.sheetsService.addAuditLog({
         timestamp: new Date().toISOString(),
         eventType: AuditEventType.WEBHOOK_RECEIVED,
@@ -213,20 +226,53 @@ switch (eventType) {
         user: 'INTAKEQ_WEBHOOK',
         systemNotes: JSON.stringify({
           formId: payload.formId,
-          clientId: payload.ClientId
+          clientId: payload.ClientId,
+          isFullIntake: !!payload.IntakeId
         })
       });
-
+  
+      // Ensure we have responses to process
+      if (!payload.responses) {
+        return {
+          success: false,
+          error: 'No form responses provided',
+          retryable: false
+        };
+      }
+  
+      // Process responses based on form type
+      const formResponses: Record<string, any> = payload.IntakeId ? 
+        this.extractAccessibilitySection(payload.responses) : 
+        payload.responses;
+  
+      // Validate processed responses
+      if (Object.keys(formResponses).length === 0) {
+        return {
+          success: false,
+          error: 'No valid accessibility responses found',
+          retryable: false
+        };
+      }
+  
       // Process form data
-      // Additional form processing logic would go here
-
+      await this.sheetsService.processAccessibilityForm({
+        clientId: payload.ClientId.toString(),
+        clientName: payload.ClientName,
+        clientEmail: payload.ClientEmail,
+        formResponses: formResponses
+      });
+  
+      // Return success response
       return {
         success: true,
         details: {
           formId: payload.formId,
-          clientId: payload.ClientId
+          clientId: payload.ClientId,
+          type: payload.IntakeId ? 'full-intake' : 'accessibility-form',
+          source: payload.IntakeId ? 'embedded' : 'standalone'
         }
       };
+  
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       await this.logWebhookError('FORM_PROCESSING_ERROR', errorMessage, payload);
@@ -296,21 +342,31 @@ switch (eventType) {
   /**
    * Log retry attempt
    */
-  private async logRetryAttempt(
-    payload: IntakeQWebhookPayload,
-    attempt: number
-  ): Promise<void> {
-    await this.sheetsService.addAuditLog({
-      timestamp: new Date().toISOString(),
-      eventType: AuditEventType.WEBHOOK_RECEIVED,
-      description: `Retry attempt ${attempt + 1} for ${payload.Type}`,
-      user: 'SYSTEM',
-      systemNotes: JSON.stringify({
-        attempt: attempt + 1,
-        type: payload.Type,
-        clientId: payload.ClientId,
-        timestamp: new Date().toISOString()
-      })
-    });
+  private extractAccessibilitySection(responses: Record<string, any>): Record<string, any> {
+    // Map the accessibility questions from the full intake form
+    const accessibilityResponses: Record<string, any> = {};
+    
+    // Define accessibility question mappings
+    const questionMappings = {
+      'Do you use any mobility devices?': 'mobility_devices',
+      'Access needs related to mobility/disability (Please specify)': 'mobility_other',
+      'Do you experience sensory sensitivities?': 'sensory_sensitivities',
+      'Other (Please specify):': 'sensory_other',
+      'Do you experience challenges with physical environment?': 'physical_environment',
+      'Please indicate your comfort level with this possibility:': 'room_consistency',
+      'Do you have support needs that involve any of the following?': 'support_needs',
+      'Is there anything else we should know about your space or accessibility needs?': 'additional_notes'
+    };
+  
+    // Extract relevant responses
+    for (const [question, key] of Object.entries(questionMappings)) {
+      if (responses[question] !== undefined) {
+        accessibilityResponses[question] = responses[question];
+      }
+    }
+  
+    console.log('Extracted accessibility responses:', accessibilityResponses);
+    
+    return accessibilityResponses;
   }
 }
