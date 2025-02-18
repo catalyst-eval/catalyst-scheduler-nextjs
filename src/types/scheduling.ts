@@ -2,22 +2,24 @@
 
 export type SessionType = 'in-person' | 'telehealth' | 'group' | 'family';
 export type AppointmentSource = 'intakeq' | 'manual';
-// Add after export type AppointmentSource = 'intakeq' | 'manual';
 export type AlertSeverity = 'high' | 'medium' | 'low';
+
+// Standard office ID format (e.g., 'B-a', 'A-c')
+export type StandardOfficeId = `${Uppercase<string>}-${Lowercase<string>}`;
 
 export interface AppointmentRecord {
   appointmentId: string;
   clientId: string;
-  clientName: string; // Add this property
+  clientName: string;
   clinicianId: string;
-  clinicianName: string; // Add this property
-  officeId: string;
-  sessionType: 'in-person' | 'telehealth' | 'group' | 'family';
+  clinicianName: string;
+  officeId: StandardOfficeId;
+  sessionType: SessionType;
   startTime: string;
   endTime: string;
   status: 'scheduled' | 'completed' | 'cancelled' | 'rescheduled';
   lastUpdated: string;
-  source: 'intakeq' | 'manual'; // Update the type to a union type
+  source: AppointmentSource;
   requirements?: {
     accessibility?: boolean;
     specialFeatures?: string[];
@@ -32,7 +34,7 @@ export interface DailyScheduleSummary {
     type: string;
     description: string;
     severity: AlertSeverity;
-    officeId?: string;
+    officeId?: StandardOfficeId;
     appointmentIds?: string[];
   }>;
   alerts: Array<{
@@ -40,7 +42,7 @@ export interface DailyScheduleSummary {
     message: string;
     severity: AlertSeverity;
   }>;
-  officeUtilization: Map<string, {
+  officeUtilization: Map<StandardOfficeId, {
     totalSlots: number;
     bookedSlots: number;
     specialNotes?: string[];
@@ -56,14 +58,14 @@ export interface SchedulingRequest {
   clientAge?: number;
   requirements?: {
     accessibility?: boolean;
-    roomPreference?: string;
+    roomPreference?: StandardOfficeId;
     specialFeatures?: string[];
   };
 }
 
 export interface SchedulingResult {
   success: boolean;
-  officeId?: string;
+  officeId?: StandardOfficeId;
   conflicts?: SchedulingConflict[];
   notes?: string;
   error?: string;
@@ -71,7 +73,7 @@ export interface SchedulingResult {
 }
 
 export interface SchedulingConflict {
-  officeId: string;
+  officeId: StandardOfficeId;
   existingBooking: {
     clientId: string;
     clinicianId: string;
@@ -82,12 +84,12 @@ export interface SchedulingConflict {
   resolution?: {
     type: 'relocate' | 'cannot-relocate';
     reason: string;
-    newOfficeId?: string;
+    newOfficeId?: StandardOfficeId;
   };
 }
 
 export interface TimeSlotRequest {
-  officeId: string;
+  officeId: StandardOfficeId;
   dateTime: string;
   duration: number;
 }
