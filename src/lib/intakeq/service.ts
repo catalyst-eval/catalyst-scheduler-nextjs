@@ -7,11 +7,14 @@ import crypto from 'crypto';
 export class IntakeQService {
   private readonly baseUrl: string;
   private readonly headers: HeadersInit;
+  private readonly MAX_RETRIES = 3;
+  private readonly RETRY_DELAY = 1000; // 1 second base delay
 
   constructor(
     private readonly apiKey: string,
     private readonly sheetsService: GoogleSheetsService,
-    baseUrl: string = 'https://intakeq.com/api/v1'
+    baseUrl: string = 'https://intakeq.com/api/v1',
+    private readonly useMockData: boolean = false
   ) {
     this.baseUrl = baseUrl;
     this.headers = {
@@ -23,84 +26,107 @@ export class IntakeQService {
   async getAppointments(startDate: string, endDate: string): Promise<IntakeQAppointment[]> {
     try {
       console.log('Fetching IntakeQ appointments:', { startDate, endDate });
-      
-      // Convert to EST dates
+
+      // Convert dates to EST and set proper day boundaries
       const requestedStart = new Date(startDate);
       const requestedEnd = new Date(endDate);
-      
-      // Add buffer days to ensure we get all appointments
-      const bufferStart = new Date(requestedStart);
-      bufferStart.setDate(bufferStart.getDate() - 1);
-      const bufferEnd = new Date(requestedEnd);
-      bufferEnd.setDate(bufferEnd.getDate() + 1);
-  
-      console.log('Date ranges:', {
-        requested: {
-          start: requestedStart.toISOString(),
-          end: requestedEnd.toISOString()
-        },
-        buffered: {
-          start: bufferStart.toISOString(),
-          end: bufferEnd.toISOString()
-        }
+
+      // Ensure we're working with EST dates
+      const startEST = new Date(requestedStart.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+      const endEST = new Date(requestedEnd.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+      startEST.setHours(0, 0, 0, 0);
+      endEST.setHours(23, 59, 59, 999);
+
+      console.log('Date ranges (EST):', {
+        start: startEST.toLocaleString('en-US', { timeZone: 'America/New_York' }),
+        end: endEST.toLocaleString('en-US', { timeZone: 'America/New_York' })
       });
-  
+
       const params = new URLSearchParams({
-        StartDate: bufferStart.getTime().toString(),
-        EndDate: bufferEnd.getTime().toString(),
-        Status: 'Confirmed,WaitingConfirmation',
+        StartDate: startEST.getTime().toString(),
+        EndDate: endEST.getTime().toString(),
+        Status: 'Confirmed,WaitingConfirmation,Pending',
         dateField: 'StartDateIso'
       });
-  
+
       const url = `${this.baseUrl}/appointments?${params}`;
-  
+
       console.log('IntakeQ Request:', {
         endpoint: '/appointments',
         params: Object.fromEntries(params),
-        requestedRange: {
-          start: requestedStart.toISOString(),
-          end: requestedEnd.toISOString()
+        requestRange: {
+          start: startEST.toLocaleString('en-US', { timeZone: 'America/New_York' }),
+          end: endEST.toLocaleString('en-US', { timeZone: 'America/New_York' })
         }
       });
-  
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: this.headers
-      });
-  
+
+      let attempt = 0;
+      let response;
+      let lastError;
+
+      while (attempt < this.MAX_RETRIES) {
+        try {
+          response = await fetch(url, {
+            method: 'GET',
+            headers: this.headers
+          });
+
+          if (response.ok) break;
+
+          const errorText = await response.text();
+          lastError = `HTTP ${response.status}: ${errorText}`;
+          
+          console.log(`Attempt ${attempt + 1} failed:`, {
+            status: response.status,
+            error: lastError
+          });
+
+          attempt++;
+          if (attempt < this.MAX_RETRIES) {
+            const delay = this.RETRY_DELAY * Math.pow(2, attempt - 1);
+            await new Promise(resolve => setTimeout(resolve, delay));
+          }
+        } catch (error) {
+          lastError = error instanceof Error ? error.message : 'Unknown error';
+          console.error(`Attempt ${attempt + 1} error:`, lastError);
+          
+          attempt++;
+          if (attempt < this.MAX_RETRIES) {
+            const delay = this.RETRY_DELAY * Math.pow(2, attempt - 1);
+            await new Promise(resolve => setTimeout(resolve, delay));
+          }
+        }
+      }
+
+      if (!response || !response.ok) {
+        throw new Error(`IntakeQ API error after ${this.MAX_RETRIES} attempts: ${lastError}`);
+      }
+
       const text = await response.text();
       console.log('Raw IntakeQ Response:', text.substring(0, 500) + '...');
-  
-      if (!response.ok) {
-        throw new Error(`IntakeQ API error (${response.status}): ${text}`);
-      }
-  
-      const appointments = JSON.parse(text);
-  
-      // In getAppointments method
-const filteredAppointments = appointments.filter((appt: IntakeQAppointment) => {
-  const apptDate = new Date(appt.StartDateIso);
-  const requestStart = new Date(requestedStart);
-  const requestEnd = new Date(requestedEnd);
-  
-  // Convert to EST strings for comparison
-  const apptESTDate = apptDate.toLocaleString('en-US', { timeZone: 'America/New_York' }).split(',')[0];
-  const targetESTDate = requestStart.toLocaleString('en-US', { timeZone: 'America/New_York' }).split(',')[0];
-  
-  console.log('Comparing dates:', {
-    appointment: {
-      id: appt.Id,
-      name: appt.ClientName,
-      date: apptESTDate,
-      status: appt.Status,
-      time: appt.StartDateLocalFormatted
-    },
-    target: targetESTDate
-  });
 
-  return apptESTDate === targetESTDate;
-});
-  
+      const appointments = JSON.parse(text);
+
+      // Filter appointments to match requested date in EST
+      const filteredAppointments = appointments.filter((appt: IntakeQAppointment) => {
+        const apptDate = new Date(appt.StartDateIso);
+        const apptEST = new Date(apptDate.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+        apptEST.setHours(0, 0, 0, 0);  // Compare dates only
+
+        const targetEST = new Date(requestedStart.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+        targetEST.setHours(0, 0, 0, 0);  // Compare dates only
+
+        console.log('Appointment comparison:', {
+          id: appt.Id,
+          client: appt.ClientName,
+          apptDate: apptEST.toLocaleString('en-US', { timeZone: 'America/New_York' }),
+          targetDate: targetEST.toLocaleString('en-US', { timeZone: 'America/New_York' }),
+          matches: apptEST.getTime() === targetEST.getTime()
+        });
+
+        return apptEST.getTime() === targetEST.getTime();
+      });
+
       console.log('IntakeQ Response:', {
         status: response.status,
         totalReturned: appointments.length,
@@ -112,7 +138,7 @@ const filteredAppointments = appointments.filter((appt: IntakeQAppointment) => {
           status: filteredAppointments[0].Status
         } : null
       });
-  
+
       return filteredAppointments;
     } catch (error) {
       console.error('IntakeQ API Error:', error instanceof Error ? error.message : 'Unknown error');
@@ -125,7 +151,7 @@ const filteredAppointments = appointments.filter((appt: IntakeQAppointment) => {
         systemNotes: error instanceof Error ? error.message : 'Unknown error'
       });
       
-      return [];
+      throw error;
     }
   }
 

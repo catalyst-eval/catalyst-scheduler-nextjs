@@ -11,8 +11,34 @@ import { RecipientManagementService } from '@/lib/email/recipients';
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
-  const date = searchParams.get('date') || '2025-02-17';
-    console.log('Starting daily schedule test');
+    const requestedDate = searchParams.get('date') || '2025-02-17';
+    const testType = searchParams.get('test');
+    
+    console.log('Starting daily schedule test for:', requestedDate);
+    
+    // Create date in EST
+    const targetDate = new Date(requestedDate + 'T12:00:00.000Z'); // Use noon to avoid timezone edge cases
+    const estDateStr = targetDate.toLocaleString('en-US', { 
+      timeZone: 'America/New_York',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    });
+    
+    console.log('Timezone handling:', {
+      requested: requestedDate,
+      estDate: estDateStr,
+      isoString: targetDate.toISOString()
+    });
+    
+    // Convert to ISO string for consistency
+    const dateStr = targetDate.toISOString();
+    
+    console.log('Date configuration:', {
+      requested: requestedDate,
+      target: dateStr,
+      estLocal: targetDate.toLocaleString('en-US', { timeZone: 'America/New_York' })
+    });
     
     // Initialize services
     const sheetsService = await initializeGoogleSheets();
@@ -26,12 +52,10 @@ export async function GET(request: Request) {
 
     const emailService = await initializeEmailService(sheetsService);
     console.log('Email service initialized');
-    
+
     // Get today's date in EST/EDT
-    const today = new Date();
-    const estDate = new Date(today.toLocaleString('en-US', { timeZone: 'America/New_York' }));
-    const dateStr = estDate.toISOString().split('T')[0];
-    console.log('Testing for date:', dateStr);
+    const estDate = new Date(targetDate.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+    console.log('Testing for date:', estDate.toISOString().split('T')[0]);
 
     // Test IntakeQ connection
     const connected = await intakeQService.testConnection();
@@ -41,10 +65,19 @@ export async function GET(request: Request) {
       throw new Error('Failed to connect to IntakeQ');
     }
 
-    // Get appointments
+    // Get appointments for the full target date
+    const startOfDay = `${dateStr.split('T')[0]}T00:00:00Z`;
+    const endOfDay = `${dateStr.split('T')[0]}T23:59:59Z`;
+    
+    console.log('Appointment search range:', {
+      startOfDay,
+      endOfDay,
+      timezone: 'UTC'
+    });
+
     const appointments = await intakeQService.getAppointments(
-      `${dateStr}T00:00:00Z`,
-      `${dateStr}T23:59:59Z`
+      startOfDay,
+      endOfDay
     );
     console.log('Retrieved appointments:', appointments.length);
 

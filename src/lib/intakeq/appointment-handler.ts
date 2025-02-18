@@ -66,60 +66,77 @@ async handleAppointment(payload: IntakeQWebhookPayload): Promise<{ success: bool
   }
 }
 
-  private async handleNewAppointment(appointment: IntakeQAppointment, clientId: string | number): Promise<{ success: boolean; error?: string }> {
-    try {
-      console.log('Handling new appointment:', {
+private async handleNewAppointment(appointment: IntakeQAppointment, clientId: string | number): Promise<{ success: boolean; error?: string }> {
+  try {
+    // Enhanced logging for appointment data
+    console.log('Processing new appointment:', {
+      appointmentId: appointment.Id,
+      clientId,
+      clientName: appointment.ClientName,
+      startDate: appointment.StartDateIso,
+      practitionerId: appointment.PractitionerId,
+      serviceName: appointment.ServiceName
+    });
+
+    // 1. Get required data
+    const [offices, rules, clinicians] = await Promise.all([
+      this.sheetsService.getOffices(),
+      this.sheetsService.getAssignmentRules(),
+      this.sheetsService.getClinicians()
+    ]);
+
+    // Enhanced clinician lookup logging
+    console.log('Clinician lookup:', {
+      searchingFor: appointment.PractitionerId,
+      availableClinicians: clinicians.map(c => ({
+        id: c.clinicianId,
+        name: c.name,
+        intakeQId: c.intakeQPractitionerId
+      }))
+    });
+
+    // Find matching clinician with exact match
+    const matchedClinician = clinicians.find(c => 
+      c.intakeQPractitionerId && 
+      c.intakeQPractitionerId.trim() === appointment.PractitionerId.trim()
+    );
+
+    if (!matchedClinician) {
+      const error = `No clinician found matching IntakeQ ID: ${appointment.PractitionerId}`;
+      console.error(error, {
         appointmentId: appointment.Id,
-        clientId,
-        startDate: appointment.StartDateIso,
-        practitionerId: appointment.PractitionerId
+        practitionerName: appointment.PractitionerName,
+        allClinicianIds: clinicians.map(c => c.intakeQPractitionerId)
       });
+      throw new Error(error);
+    }
 
-      // 1. Get required data
-      const [offices, rules, clinicians] = await Promise.all([
-        this.sheetsService.getOffices(),
-        this.sheetsService.getAssignmentRules(),
-        this.sheetsService.getClinicians()
-      ]);
+    console.log('Found matching clinician:', {
+      clinicianId: matchedClinician.clinicianId,
+      name: matchedClinician.name,
+      intakeQId: matchedClinician.intakeQPractitionerId
+    });
 
-      console.log('Data fetched:', {
-        officeCount: offices.length,
-        ruleCount: rules.length,
-        clinicianCount: clinicians.length,
-        practitionerIds: clinicians.map(c => c.intakeQPractitionerId)
-      });
+    // 2. Create office assignment service
+    const assignmentService = new OfficeAssignmentService(
+      offices,
+      rules,
+      clinicians
+    );
 
-      // 2. Find matching clinician
-      const clinician = clinicians.find(c => c.intakeQPractitionerId === appointment.PractitionerId);
-      if (!clinician) {
-        throw new Error(`Clinician ${appointment.PractitionerId} not found`);
+    // 3. Convert to scheduling request
+    const request = {
+      clientId: clientId.toString(),
+      clinicianId: matchedClinician.clinicianId,
+      dateTime: appointment.StartDateIso,
+      duration: appointment.Duration,
+      sessionType: this.determineSessionType(appointment.ServiceName),
+      requirements: {
+        accessibility: false
       }
+    };
 
-      console.log('Found clinician:', {
-        clinicianId: clinician.clinicianId,
-        name: clinician.name,
-        intakeQId: clinician.intakeQPractitionerId
-      });
-
-      // 2. Create office assignment service
-      const assignmentService = new OfficeAssignmentService(
-        offices,
-        rules,
-        clinicians
-      );
-
-      // 3. Convert to scheduling request
-      const request = {
-        clientId: clientId.toString(),
-        clinicianId: clinician.clinicianId, // Use internal ID
-        dateTime: appointment.StartDateIso,
-        duration: appointment.Duration,
-        sessionType: this.determineSessionType(appointment.ServiceName),
-        requirements: {
-          accessibility: false
-        }
-      };
-
+    // Rest of the function remains the same, but using matchedClinician instead of clinician
       console.log('Created scheduling request:', request);
 
       // 4. Find optimal office
@@ -135,8 +152,8 @@ async handleAppointment(payload: IntakeQWebhookPayload): Promise<{ success: bool
         appointmentId: appointment.Id,
         clientId: clientId.toString(),
         clientName: appointment.ClientName,  // Add this
-        clinicianId: clinician.clinicianId,
-        clinicianName: clinician.name,  // Add this
+        clinicianId: matchedClinician.clinicianId,
+        clinicianName: matchedClinician.name,
         officeId: assignmentResult.officeId!,
         sessionType: this.determineSessionType(appointment.ServiceName),
         startTime: appointment.StartDateIso,
