@@ -12,7 +12,7 @@ import type {
   AuditLogEntry 
 } from '@/types/sheets';
 
-import type { AppointmentRecord } from '../../types/scheduling';
+import type { AppointmentRecord, StandardOfficeId } from '../../types/scheduling';
 import { SheetsCacheService } from './sheets-cache';
 
 export enum AuditEventType {
@@ -299,41 +299,49 @@ export class GoogleSheetsService {
   }
 
   // In sheets.ts
-async getAppointments(startDate: string, endDate: string): Promise<AppointmentRecord[]> {
-  try {
-    const values = await this.readSheet('Appointments!A2:N');
+  async getAppointments(startDate: string, endDate: string): Promise<AppointmentRecord[]> {
+    try {
+      const values = await this.readSheet('Appointments!A2:V');  // Read all 22 columns
+      
+      if (!values || !Array.isArray(values)) {
+        console.log('No appointments found in sheet');
+        return [];
+      }
+  
+      console.log('Processing appointments from sheet:', {
+        rowCount: values.length,
+        dateRange: { startDate, endDate }
+      });
+  
+  const mappedAppointments: AppointmentRecord[] = values
+    .map(row => {
+      try {
+        const standardizeOfficeId = (id: string): StandardOfficeId => {
+          const match = id.match(/^([A-Z])-([a-z])$/);
+          if (match) return id as StandardOfficeId;
+          return 'A-a' as StandardOfficeId;
+        };
+  
+        const suggestedOffice = row[14] || row[5] || 'A-a'; // Use column O (suggestedOfficeId) or fall back to column F (officeId)
+        
+        const appointment: AppointmentRecord = {
+          appointmentId: row[0] || '',
+          clientId: row[1] || '',
+          clientName: row[2] || row[1] || '',
+          clinicianId: row[3] || '',
+          clinicianName: row[4] || row[3] || '',
+          officeId: standardizeOfficeId(suggestedOffice),
+          suggestedOfficeId: suggestedOffice,
+          sessionType: (row[6] || 'in-person') as 'in-person' | 'telehealth' | 'group' | 'family',
+          startTime: row[7] || '',
+          endTime: row[8] || '',
+          status: (row[9] || 'scheduled') as 'scheduled' | 'completed' | 'cancelled' | 'rescheduled',
+          lastUpdated: row[10] || new Date().toISOString(),
+          source: (row[11] || 'manual') as 'intakeq' | 'manual',
+          requirements: { accessibility: false, specialFeatures: [] },
+          notes: ''
+        };
     
-    if (!values || !Array.isArray(values)) {
-      console.log('No appointments found in sheet');
-      return [];
-    }
-
-    console.log('Processing appointments from sheet:', {
-      rowCount: values.length,
-      dateRange: { startDate, endDate }
-    });
-
-    const mappedAppointments: AppointmentRecord[] = values
-      .map(row => {
-        try {
-          const appointment: AppointmentRecord = {
-            appointmentId: row[0] || '',
-            clientId: row[1] || '',
-            clientName: row[2] || row[1] || '', // Use name if available, fall back to ID
-            clinicianId: row[3] || '',
-            clinicianName: row[4] || row[3] || '', // Use name if available, fall back to ID
-            officeId: row[5] || '',
-            sessionType: (row[6] || 'in-person') as 'in-person' | 'telehealth' | 'group' | 'family',
-            startTime: row[7] || '',
-            endTime: row[8] || '',
-            status: (row[9] || 'scheduled') as 'scheduled' | 'completed' | 'cancelled' | 'rescheduled',
-            lastUpdated: row[10] || new Date().toISOString(),
-            source: (row[11] || 'manual') as 'intakeq' | 'manual',
-            requirements: { accessibility: false, specialFeatures: [] },
-            notes: ''
-          };
-
-          // Parse requirements JSON safely
           try {
             const requirementsStr = row[12]?.toString().trim();
             if (requirementsStr) {
@@ -347,12 +355,12 @@ async getAppointments(startDate: string, endDate: string): Promise<AppointmentRe
           } catch (err) {
             console.error('Error parsing requirements JSON:', err, {value: row[12]});
           }
-
+    
           // Add notes if present
           if (row[13]) {
             appointment.notes = row[13];
           }
-
+    
           return appointment;
         } catch (error) {
           console.error('Error mapping appointment row:', error, { row });

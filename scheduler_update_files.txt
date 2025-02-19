@@ -1,0 +1,2091 @@
+// src/types/scheduling.ts
+
+export type SessionType = 'in-person' | 'telehealth' | 'group' | 'family';
+export type AppointmentSource = 'intakeq' | 'manual';
+export type AlertSeverity = 'high' | 'medium' | 'low';
+
+// Standard office ID format (e.g., 'B-a', 'A-c')
+export type StandardOfficeId = `${Uppercase<string>}-${Lowercase<string>}`;
+
+export interface AppointmentRecord {
+  appointmentId: string;
+  clientId: string;
+  clientName: string;
+  clinicianId: string;
+  clinicianName: string;
+  officeId: StandardOfficeId;
+  suggestedOfficeId?: string;
+  sessionType: SessionType;
+  startTime: string;
+  endTime: string;
+  status: 'scheduled' | 'completed' | 'cancelled' | 'rescheduled';
+  lastUpdated: string;
+  source: AppointmentSource;
+  requirements?: {
+    accessibility?: boolean;
+    specialFeatures?: string[];
+  };
+  notes?: string;
+}
+
+export interface DailyScheduleSummary {
+  date: string;
+  appointments: AppointmentRecord[];
+  conflicts: Array<{
+    type: string;
+    description: string;
+    severity: AlertSeverity;
+    officeId?: StandardOfficeId;
+    appointmentIds?: string[];
+  }>;
+  alerts: Array<{
+    type: string;
+    message: string;
+    severity: AlertSeverity;
+  }>;
+  officeUtilization: Map<StandardOfficeId, {
+    totalSlots: number;
+    bookedSlots: number;
+    specialNotes?: string[];
+  }>;
+}
+
+export interface SchedulingRequest {
+  clientId: string;
+  clinicianId: string;
+  dateTime: string;
+  duration: number;
+  sessionType: SessionType;
+  clientAge?: number;
+  requirements?: {
+    accessibility?: boolean;
+    roomPreference?: StandardOfficeId;
+    specialFeatures?: string[];
+  };
+}
+
+export interface SchedulingResult {
+  success: boolean;
+  officeId?: StandardOfficeId;
+  conflicts?: SchedulingConflict[];
+  notes?: string;
+  error?: string;
+  evaluationLog?: string[];
+}
+
+export interface SchedulingConflict {
+  officeId: StandardOfficeId;
+  existingBooking: {
+    clientId: string;
+    clinicianId: string;
+    sessionType: SessionType;
+    dateTime: string;
+    duration: number;
+  };
+  resolution?: {
+    type: 'relocate' | 'cannot-relocate';
+    reason: string;
+    newOfficeId?: StandardOfficeId;
+  };
+}
+
+export interface TimeSlotRequest {
+  officeId: StandardOfficeId;
+  dateTime: string;
+  duration: number;
+}
+
+export interface ValidationResult {
+  isValid: boolean;
+  conflicts?: string[];
+  error?: string;
+}// src/lib/scheduling/conflict-resolution.ts
+
+import type { 
+  SessionType,
+  SchedulingRequest,
+  SchedulingConflict,
+  StandardOfficeId
+} from '@/types/scheduling';
+
+import type { SheetOffice } from '@/types/sheets';
+
+export class ConflictResolutionService {
+  constructor(
+    private readonly availableOffices: SheetOffice[],
+    private readonly existingBookings: Map<string, SchedulingRequest[]> // officeId -> bookings
+  ) {}
+
+  private standardizeOfficeId(id: string): StandardOfficeId {
+    const match = id.match(/^([A-Z])-([a-z])$/);
+    if (match) return id as StandardOfficeId;
+    return 'A-a' as StandardOfficeId;
+  }
+
+  /**
+   * Get session priority level
+   */
+  private getSessionPriority(sessionType: SessionType): number {
+    switch (sessionType) {
+      case 'in-person':
+        return 100; // Highest priority
+      case 'group':
+      case 'family':
+        return 75;  // High priority but below individual in-person
+      case 'telehealth':
+        return 25;  // Lowest priority, can be relocated
+      default:
+        return 50;
+    }
+  }
+
+  /**
+   * Check if an office has conflicts with the requested time slot
+   */
+  public async checkConflicts(
+    officeId: string,
+    request: SchedulingRequest
+  ): Promise<SchedulingConflict[]> {
+    const conflicts: SchedulingConflict[] = [];
+    const existingBookings = this.existingBookings.get(officeId) || [];
+
+    const requestStart = new Date(request.dateTime).getTime();
+    const requestEnd = requestStart + (request.duration * 60 * 1000);
+
+    for (const booking of existingBookings) {
+      const bookingStart = new Date(booking.dateTime).getTime();
+      const bookingEnd = bookingStart + (booking.duration * 60 * 1000);
+
+      // Check for time overlap
+      if (requestStart < bookingEnd && requestEnd > bookingStart) {
+        // We have a conflict
+        const conflict: SchedulingConflict = {
+          officeId: this.standardizeOfficeId(officeId),
+          existingBooking: booking,
+          resolution: await this.resolveConflict(booking, request)
+        };
+        conflicts.push(conflict);
+      }
+    }
+
+    return conflicts;
+  }
+
+  /**
+   * Attempt to resolve a scheduling conflict
+   */
+  private async resolveConflict(
+    existingBooking: SchedulingRequest,
+    newRequest: SchedulingRequest
+  ): Promise<{ type: 'relocate' | 'cannot-relocate'; reason: string; newOfficeId?: StandardOfficeId }> {
+    const existingPriority = this.getSessionPriority(existingBooking.sessionType);
+    const newPriority = this.getSessionPriority(newRequest.sessionType);
+
+    // If new booking is lower priority, don't relocate existing
+    if (newPriority <= existingPriority) {
+      return {
+        type: 'cannot-relocate',
+        reason: `Existing ${existingBooking.sessionType} session has priority over new ${newRequest.sessionType} session`
+      };
+    }
+
+    // Try to find alternative office for existing booking
+    const alternativeOffice = await this.findAlternativeOffice(existingBooking);
+    if (alternativeOffice) {
+      return {
+        type: 'relocate',
+        reason: `${newRequest.sessionType} takes priority, relocating existing ${existingBooking.sessionType} to ${alternativeOffice.officeId}`,
+        newOfficeId: this.standardizeOfficeId(alternativeOffice.officeId)
+      };
+    }
+
+    return {
+      type: 'cannot-relocate',
+      reason: 'No alternative offices available for relocation'
+    };
+  }
+
+  /**
+   * Find an alternative office for a booking
+   */
+  private async findAlternativeOffice(
+    booking: SchedulingRequest
+  ): Promise<SheetOffice | null> {
+    // Filter available offices based on booking requirements
+    const validOffices = this.availableOffices.filter(office => {
+      // Must be in service
+      if (!office.inService) return false;
+
+      // Check accessibility if required
+      if (booking.requirements?.accessibility && !office.isAccessible) {
+        return false;
+      }
+
+      // Check if office already has conflicts
+      const officeBookings = this.existingBookings.get(office.officeId) || [];
+      const hasConflicts = officeBookings.some(existing => {
+        const existingStart = new Date(existing.dateTime).getTime();
+        const existingEnd = existingStart + (existing.duration * 60 * 1000);
+        const bookingStart = new Date(booking.dateTime).getTime();
+        const bookingEnd = bookingStart + (booking.duration * 60 * 1000);
+
+        return bookingStart < existingEnd && bookingEnd > existingStart;
+      });
+
+      return !hasConflicts;
+    });
+
+    // Return first available office or null if none found
+    return validOffices.length > 0 ? validOffices[0] : null;
+  }
+}// src/lib/scheduling/daily-assignment-service.ts
+
+import { toEST, getESTDayRange, isSameESTDay } from '../util/date-helpers';
+import type { 
+  AppointmentRecord,
+  SchedulingConflict,
+  StandardOfficeId
+} from '@/types/scheduling';
+import type { 
+  SheetOffice, 
+  SheetClinician, 
+  ClientPreference
+} from '@/types/sheets';
+
+import { GoogleSheetsService, AuditEventType } from '@/lib/google/sheets';
+import type { IntakeQService } from '@/lib/intakeq/service';
+import { OfficeAssignmentService } from './office-assignment';
+
+interface DailyScheduleSummary {
+  date: string;
+  appointments: AppointmentRecord[];
+  conflicts: Array<{
+    type: 'double-booking' | 'accessibility' | 'capacity';
+    description: string;
+    severity: 'high' | 'medium' | 'low';
+    officeId?: StandardOfficeId;
+    appointmentIds?: string[];
+  }>;
+  officeUtilization: Map<StandardOfficeId, {
+    totalSlots: number;
+    bookedSlots: number;
+    specialNotes?: string[];
+  }>;
+  alerts: Array<{
+    type: 'accessibility' | 'capacity' | 'scheduling' | 'system';
+    message: string;
+    severity: 'high' | 'medium' | 'low';
+  }>;
+}
+
+export class DailyAssignmentService {
+  constructor(
+    private readonly sheetsService: GoogleSheetsService,
+    private readonly intakeQService: IntakeQService
+  ) {}
+
+  private getTomorrowDate(): string {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(0, 0, 0, 0);
+    return tomorrow.toISOString().split('T')[0];
+  }
+  
+  async generateTomorrowSummary(): Promise<DailyScheduleSummary> {
+    return this.generateDailySummary(this.getTomorrowDate());
+  }
+
+  async generateDailySummary(date: string): Promise<DailyScheduleSummary> {
+    try {
+      console.log('Generating daily summary for:', date);
+      
+      // Get date range in EST
+      const range = getESTDayRange(date);
+const startOfDay = range.start;
+const endOfDay = range.end;
+      
+      console.log('Date range for summary:', {
+        requestedDate: date,
+        startOfDay,
+        endOfDay,
+        estDate: toEST(date).toLocaleString('en-US', { timeZone: 'America/New_York' })
+      });
+
+      // Fetch all required data
+      console.log('Fetching data...');
+      const [intakeQAppointments, offices, clinicians, clientPreferences, localAppointments] = await Promise.all([
+        this.intakeQService.getAppointments(startOfDay, endOfDay),
+        this.sheetsService.getOffices(),
+        this.sheetsService.getClinicians(),
+        this.sheetsService.getClientPreferences(),
+        this.sheetsService.getAppointments(startOfDay, endOfDay)
+      ]);
+
+      console.log('Found appointments:', {
+        intakeQ: intakeQAppointments.length,
+        local: localAppointments.length
+      });
+
+      // Create lookup maps
+      const clinicianMap = new Map(
+        clinicians.map(c => [c.intakeQPractitionerId, c]) // Map practitioner ID to clinician object
+      );
+
+      // Process appointments
+      console.log('Processing IntakeQ appointments...');
+      const processedIntakeQAppointments = await Promise.all(intakeQAppointments.map(async intakeQAppt => {
+        // Get local appointment if exists
+        const localAppt = localAppointments.find(appt => appt.appointmentId === intakeQAppt.Id);
+        const clinician = clinicianMap.get(intakeQAppt.PractitionerId);
+
+        // Get suggested office from local appointment or calculate new one
+        let suggestedOfficeId = localAppt?.suggestedOfficeId;
+        let officeId = localAppt?.officeId;
+        let notes = localAppt?.notes;
+
+        if (!suggestedOfficeId && clinician) {
+          const assignmentService = new OfficeAssignmentService(
+            offices,
+            await this.sheetsService.getAssignmentRules(),
+            clinicians
+          );
+
+          const result = await assignmentService.findOptimalOffice({
+            clientId: intakeQAppt.ClientId.toString(),
+            clinicianId: clinician.clinicianId,
+            dateTime: intakeQAppt.StartDateIso,
+            duration: this.calculateDuration(intakeQAppt.StartDateIso, intakeQAppt.EndDateIso),
+            sessionType: this.determineSessionType(intakeQAppt.ServiceName)
+          });
+
+          if (result.success) {
+            suggestedOfficeId = result.officeId;
+            officeId = result.officeId;
+            notes = result.notes;
+          }
+        }
+
+        const standardizeOfficeId = (id: string): StandardOfficeId => {
+          const match = id.match(/^([A-Z])-([a-z])$/);
+          if (match) return id as StandardOfficeId;
+          return 'A-a' as StandardOfficeId; // Default office if format doesn't match
+        };
+        
+        return {
+          appointmentId: intakeQAppt.Id,
+          clientId: intakeQAppt.ClientId.toString(),
+          clientName: intakeQAppt.ClientName,
+          clinicianId: clinicianMap.get(intakeQAppt.PractitionerId)?.clinicianId || intakeQAppt.PractitionerId,
+          clinicianName: clinicianMap.get(intakeQAppt.PractitionerId)?.name || 'Unknown',
+          officeId: standardizeOfficeId(officeId || 'A-a'),
+          suggestedOfficeId: officeId,
+          sessionType: this.determineSessionType(intakeQAppt.ServiceName),
+          startTime: intakeQAppt.StartDateIso,
+          endTime: intakeQAppt.EndDateIso,
+          status: localAppt?.status || 'scheduled',
+          lastUpdated: new Date().toISOString(),
+          source: localAppt?.source || 'intakeq' as 'intakeq' | 'manual',
+          requirements: localAppt?.requirements || {
+            accessibility: false,
+            specialFeatures: []
+          },
+          notes
+        };
+      }));
+
+      // Sort appointments by time
+      // Process local appointments that aren't from IntakeQ
+      console.log('Processing local appointments...');
+      const localOnlyAppointments = localAppointments.filter(
+        local => !intakeQAppointments.some(intakeQ => intakeQ.Id === local.appointmentId)
+      );
+
+      console.log('Appointment counts:', {
+        intakeQ: processedIntakeQAppointments.length,
+        localOnly: localOnlyAppointments.length
+      });
+
+      // Combine all appointments
+      const allAppointments = [...processedIntakeQAppointments, ...localOnlyAppointments];
+
+      // Sort appointments by time
+      allAppointments.sort((a, b) => {
+        if (a.clinicianName < b.clinicianName) return -1;
+        if (a.clinicianName > b.clinicianName) return 1;
+        return new Date(a.startTime).getTime() - new Date(b.startTime).getTime();
+      });
+
+      // Create summary
+      const summary: DailyScheduleSummary = {
+        date,
+        appointments: allAppointments,
+        conflicts: [],
+        officeUtilization: new Map(),
+        alerts: []
+      };
+
+      // Process conflicts and generate alerts
+      this.processAppointments(summary, allAppointments, offices, clinicians, clientPreferences);
+      this.calculateOfficeUtilization(summary, offices);
+      this.generateAlerts(summary);
+
+      // Log summary
+      await this.sheetsService.addAuditLog({
+        timestamp: new Date().toISOString(),
+        eventType: AuditEventType.DAILY_ASSIGNMENTS_UPDATED,
+        description: `Generated daily summary for ${date}`,
+        user: 'SYSTEM',
+        systemNotes: JSON.stringify({
+          appointmentCount: allAppointments.length,
+          conflictCount: summary.conflicts.length,
+          alertCount: summary.alerts.length
+        })
+      });
+
+      console.log('Final summary:', {
+        date,
+        totalAppointments: summary.appointments.length,
+        intakeQCount: processedIntakeQAppointments.length,
+        localCount: localOnlyAppointments.length,
+        conflicts: summary.conflicts.length,
+        alerts: summary.alerts.length,
+        sampleAppointments: summary.appointments.slice(0, 2).map(appt => ({
+          id: appt.appointmentId,
+          client: appt.clientName,
+          time: appt.startTime
+        }))
+      });
+
+      return summary;
+    } catch (error) {
+      console.error('Error generating daily summary:', error);
+      throw error;
+    }
+  }
+
+  private calculateDuration(startTime: string, endTime: string): number {
+    const start = new Date(startTime);
+    const end = new Date(endTime);
+    return Math.round((end.getTime() - start.getTime()) / (60 * 1000));
+  }
+
+  private determineSessionType(serviceName: string): 'in-person' | 'telehealth' | 'group' | 'family' {
+    const name = serviceName.toLowerCase();
+    if (name.includes('telehealth') || name.includes('virtual')) return 'telehealth';
+    if (name.includes('group')) return 'group';
+    if (name.includes('family') || name.includes('relationship')) return 'family';
+    return 'in-person';
+  }
+
+  private processAppointments(
+    summary: DailyScheduleSummary,
+    appointments: AppointmentRecord[],
+    offices: SheetOffice[],
+    clinicians: SheetClinician[],
+    clientPreferences: ClientPreference[]
+  ): void {
+    appointments.forEach((appt1, i) => {
+      // Check for overlapping appointments
+      appointments.slice(i + 1).forEach(appt2 => {
+        // Only check for overlaps if appointments are on the same day
+        const sameDay = isSameESTDay(appt1.startTime, appt2.startTime);
+        
+        if (sameDay && this.appointmentsOverlap(appt1, appt2)) {
+          // Skip telehealth appointments from conflict detection
+          if (appt1.sessionType === 'telehealth' || appt2.sessionType === 'telehealth') {
+            return;
+          }
+          
+          // Check for same office conflicts
+          if (appt1.officeId === appt2.officeId) {
+            summary.conflicts.push({
+              type: 'double-booking',
+              description: `Schedule conflict in ${appt1.officeId}: ${appt1.clientName || appt1.clientId} and ${appt2.clientName || appt2.clientId}`,
+              severity: 'high',
+              officeId: appt1.officeId,
+              appointmentIds: [appt1.appointmentId, appt2.appointmentId]
+            });
+          }
+    
+          // Check for clinician double-booking
+          if (appt1.clinicianId === appt2.clinicianId) {
+            summary.conflicts.push({
+              type: 'double-booking',
+              description: `${appt1.clinicianName || appt1.clinicianId} has overlapping appointments`,
+              severity: 'high',
+              appointmentIds: [appt1.appointmentId, appt2.appointmentId]
+            });
+          }
+        }
+      });
+      // Check for overlapping appointments
+      appointments.slice(i + 1).forEach(appt2 => {
+        if (this.appointmentsOverlap(appt1, appt2)) {
+          if (appt1.officeId === appt2.officeId) {
+            summary.conflicts.push({
+              type: 'double-booking',
+              description: `Schedule conflict in ${appt1.officeId}: ${appt1.clientName} and ${appt2.clientName}`,
+              severity: 'high',
+              officeId: appt1.officeId,
+              appointmentIds: [appt1.appointmentId, appt2.appointmentId]
+            });
+          }
+
+          if (appt1.clinicianId === appt2.clinicianId) {
+            summary.conflicts.push({
+              type: 'double-booking',
+              description: `${appt1.clinicianName} has overlapping appointments`,
+              severity: 'high',
+              appointmentIds: [appt1.appointmentId, appt2.appointmentId]
+            });
+          }
+        }
+      });
+
+      // Check accessibility requirements
+      const clientPref = clientPreferences.find(
+        pref => pref.clientId === appt1.clientId
+      );
+      const office = offices.find(
+        office => office.officeId === appt1.officeId
+      );
+
+      if (clientPref?.mobilityNeeds.length && office && !office.isAccessible) {
+        summary.conflicts.push({
+          type: 'accessibility',
+          description: `${appt1.clientName} requires accessible office but assigned to ${appt1.officeId}`,
+          severity: 'high',
+          officeId: this.standardizeOfficeId(appt1.officeId),
+          appointmentIds: [appt1.appointmentId]
+        });
+      }
+    });
+  }
+
+  private standardizeOfficeId(id: string): StandardOfficeId {
+    const match = id.match(/^([A-Z])-([a-z])$/);
+    if (match) return id as StandardOfficeId;
+    return 'A-a' as StandardOfficeId;
+  }
+
+  private calculateOfficeUtilization(
+    summary: DailyScheduleSummary,
+    offices: SheetOffice[]
+  ): void {
+    offices.forEach(office => {
+      const officeAppointments = summary.appointments.filter(
+        appt => appt.officeId === office.officeId
+      );
+
+      const totalSlots = 8; // 8-hour day
+      const bookedSlots = officeAppointments.length;
+
+      const notes: string[] = [];
+      if (office.isFlexSpace) {
+        notes.push('Flex space - coordinate with team');
+      }
+      if (bookedSlots / totalSlots > 0.9) {
+        notes.push('Critical capacity warning');
+      } else if (bookedSlots / totalSlots > 0.8) {
+        notes.push('High utilization');
+      }
+
+      summary.officeUtilization.set(this.standardizeOfficeId(office.officeId), {
+        totalSlots,
+        bookedSlots,
+        specialNotes: notes
+      });
+    });
+  }
+
+  private appointmentsOverlap(appt1: AppointmentRecord, appt2: AppointmentRecord): boolean {
+    // Convert times to minutes since midnight for easier comparison
+    const getMinutes = (time: string) => {
+      const date = new Date(time);
+      return date.getUTCHours() * 60 + date.getUTCMinutes();
+    };
+  
+    const start1 = getMinutes(appt1.startTime);
+    const end1 = start1 + this.getDurationMinutes(appt1.startTime, appt1.endTime);
+    const start2 = getMinutes(appt2.startTime);
+    const end2 = start2 + this.getDurationMinutes(appt2.startTime, appt2.endTime);
+  
+    console.log('Checking overlap:', {
+      appt1: {
+        id: appt1.appointmentId,
+        client: appt1.clientName || appt1.clientId,
+        start: start1,
+        end: end1,
+        time: new Date(appt1.startTime).toLocaleString()
+      },
+      appt2: {
+        id: appt2.appointmentId,
+        client: appt2.clientName || appt2.clientId,
+        start: start2,
+        end: end2,
+        time: new Date(appt2.startTime).toLocaleString()
+      }
+    });
+  
+    // Check actual overlap
+    return start1 < end2 && end1 > start2;
+  }
+  
+  private getDurationMinutes(startTime: string, endTime: string): number {
+    const start = new Date(startTime);
+    const end = new Date(endTime);
+    return Math.round((end.getTime() - start.getTime()) / (60 * 1000));
+  }
+
+  private generateAlerts(summary: DailyScheduleSummary): void {
+    // Check high priority conflicts
+    const highPriorityConflicts = summary.conflicts.filter(
+      conflict => conflict.severity === 'high'
+    );
+
+    if (highPriorityConflicts.length > 0) {
+      summary.alerts.push({
+        type: 'scheduling',
+        message: `${highPriorityConflicts.length} high-priority conflicts detected`,
+        severity: 'high'
+      });
+    }
+
+    // Check office capacity
+    const highCapacityOffices = Array.from(summary.officeUtilization.entries())
+      .filter(([_, data]) => data.bookedSlots / data.totalSlots > 0.8);
+
+    if (highCapacityOffices.length > 0) {
+      summary.alerts.push({
+        type: 'capacity',
+        message: `${highCapacityOffices.length} offices are at high capacity`,
+        severity: 'medium'
+      });
+    }
+  }
+}// src/lib/google/sheets.ts
+
+import { google } from 'googleapis';
+import { JWT } from 'google-auth-library';
+import type { 
+  SheetOffice, 
+  SheetClinician, 
+  AssignmentRule, 
+  ClientPreference,
+  ScheduleConfig,
+  IntegrationSetting,
+  AuditLogEntry 
+} from '@/types/sheets';
+
+import type { AppointmentRecord, StandardOfficeId } from '../../types/scheduling';
+import { SheetsCacheService } from './sheets-cache';
+
+export enum AuditEventType {
+  CONFIG_UPDATED = 'CONFIG_UPDATED',
+  RULE_CREATED = 'RULE_CREATED',
+  RULE_UPDATED = 'RULE_UPDATED',
+  CLIENT_PREFERENCES_UPDATED = 'CLIENT_PREFERENCES_UPDATED',
+  CLIENT_OFFICE_ASSIGNED = 'CLIENT_OFFICE_ASSIGNED',
+  APPOINTMENT_CREATED = 'APPOINTMENT_CREATED',
+  APPOINTMENT_UPDATED = 'APPOINTMENT_UPDATED',
+  APPOINTMENT_CANCELLED = 'APPOINTMENT_CANCELLED',
+  APPOINTMENT_DELETED = 'APPOINTMENT_DELETED',
+  SYSTEM_ERROR = 'SYSTEM_ERROR',
+  WEBHOOK_RECEIVED = 'WEBHOOK_RECEIVED',
+  INTEGRATION_UPDATED = 'INTEGRATION_UPDATED',
+  DAILY_ASSIGNMENTS_UPDATED = 'DAILY_ASSIGNMENTS_UPDATED',
+  CRITICAL_ERROR = 'CRITICAL_ERROR'
+}
+
+export class GoogleSheetsService {
+  private sheets;
+  private spreadsheetId: string;
+  private cache: SheetsCacheService;
+
+  constructor(credentials: any, spreadsheetId: string) {
+    const client = new JWT({
+      email: credentials.client_email,
+      key: credentials.private_key,
+      scopes: ['https://www.googleapis.com/auth/spreadsheets']
+    });
+
+    this.sheets = google.sheets({ version: 'v4', auth: client });
+    this.spreadsheetId = spreadsheetId;
+    this.cache = new SheetsCacheService();
+  }
+
+  private async readSheet(range: string) {
+    const cacheKey = `sheet:${range}`;
+    
+    try {
+      return await this.cache.getOrFetch(
+        cacheKey,
+        async () => {
+          console.log(`Reading sheet range: ${range}`);
+          const response = await this.sheets.spreadsheets.values.get({
+            spreadsheetId: this.spreadsheetId,
+            range,
+          });
+          return response.data.values;
+        },
+        60000 // 1 minute cache TTL
+      );
+    } catch (error) {
+      console.error(`Error reading sheet ${range}:`, error);
+      await this.addAuditLog({
+        timestamp: new Date().toISOString(),
+        eventType: AuditEventType.SYSTEM_ERROR,
+        description: `Failed to read sheet ${range}`,
+        user: 'SYSTEM',
+        systemNotes: JSON.stringify(error)
+      });
+      throw new Error(`Failed to read sheet ${range}`);
+    }
+  }
+
+  private async appendRows(range: string, values: any[][]) {
+    try {
+      await this.sheets.spreadsheets.values.append({
+        spreadsheetId: this.spreadsheetId,
+        range,
+        valueInputOption: 'RAW',
+        requestBody: {
+          values
+        }
+      });
+    } catch (error) {
+      console.error(`Error appending to sheet ${range}:`, error);
+      throw error;
+    }
+  }
+
+  async getOffices(): Promise<SheetOffice[]> {
+    const values = await this.readSheet('Offices Configuration!A2:M');
+    
+    return values?.map(row => ({
+      officeId: row[0],
+      name: row[1],
+      unit: row[2],
+      inService: row[3] === 'TRUE',
+      floor: row[4] as 'upstairs' | 'downstairs',
+      isAccessible: row[5] === 'TRUE',
+      size: row[6] as 'small' | 'medium' | 'large',
+      ageGroups: row[7]?.split(',').map((s: string) => s.trim()) || [],
+      specialFeatures: row[8]?.split(',').map((s: string) => s.trim()) || [],
+      primaryClinician: row[9] || undefined,
+      alternativeClinicians: row[10]?.split(',').map((s: string) => s.trim()) || [],
+      isFlexSpace: row[11] === 'TRUE',
+      notes: row[12]
+    })) ?? [];
+  }
+
+  async getClinicians(): Promise<SheetClinician[]> {
+    const values = await this.readSheet('Clinicians Configuration!A2:M');
+    
+    return values?.map(row => ({
+      clinicianId: row[0],
+      name: row[1],
+      email: row[2],
+      role: row[3] as 'owner' | 'admin' | 'clinician' | 'intern',
+      ageRangeMin: Number(row[4]),
+      ageRangeMax: Number(row[5]),
+      specialties: row[6]?.split(',').map((s: string) => s.trim()) || [],
+      caseloadLimit: Number(row[7]),
+      currentCaseload: Number(row[8]),
+      preferredOffices: row[9]?.split(',').map((s: string) => s.trim()) || [],
+      allowsRelationship: row[10] === 'TRUE',
+      certifications: row[11]?.split(',').map((s: string) => s.trim()) || [],
+      intakeQPractitionerId: row[12]
+    })) ?? [];
+  }
+
+  async getAssignmentRules(): Promise<AssignmentRule[]> {
+    const values = await this.readSheet('Assignment Rules!A2:H');
+    
+    return values?.map(row => ({
+      priority: Number(row[0]),
+      ruleName: row[1],
+      ruleType: row[2],
+      condition: row[3],
+      officeIds: row[4]?.split(',').map((s: string) => s.trim()) || [],
+      overrideLevel: row[5] as 'hard' | 'soft' | 'none',
+      active: row[6] === 'TRUE',
+      notes: row[7]
+    })) ?? [];
+  }
+
+  async getClientPreferences(): Promise<ClientPreference[]> {
+    const values = await this.readSheet('Client Preferences!A2:L');
+    
+    return values?.map(row => ({
+      clientId: row[0],
+      name: row[1],
+      email: row[2],
+      mobilityNeeds: JSON.parse(row[3] || '[]'),
+      sensoryPreferences: JSON.parse(row[4] || '[]'),
+      physicalNeeds: JSON.parse(row[5] || '[]'),
+      roomConsistency: Number(row[6]),
+      supportNeeds: JSON.parse(row[7] || '[]'),
+      specialFeatures: [], // Added required field with default empty array
+      additionalNotes: row[8],
+      lastUpdated: row[9],
+      preferredClinician: row[10],
+      assignedOffice: row[11]
+    })) ?? [];
+  }
+
+  async getScheduleConfig(): Promise<ScheduleConfig[]> {
+    const values = await this.readSheet('Schedule Configuration!A2:E');
+    
+    return values?.map(row => ({
+      settingName: row[0],
+      value: row[1],
+      description: row[2],
+      lastUpdated: row[3],
+      updatedBy: row[4]
+    })) ?? [];
+  }
+
+  async getIntegrationSettings(): Promise<IntegrationSetting[]> {
+    const values = await this.readSheet('Integration Settings!A2:E');
+    
+    return values?.map(row => ({
+      serviceName: row[0],
+      settingType: row[1],
+      value: row[2],
+      description: row[3],
+      lastUpdated: row[4]
+    })) ?? [];
+  }
+
+  async addAuditLog(entry: AuditLogEntry): Promise<void> {
+    try {
+      const rowData = [
+        entry.timestamp,
+        entry.eventType,
+        entry.description,
+        entry.user,
+        entry.previousValue || '',
+        entry.newValue || '',
+        entry.systemNotes || ''
+      ];
+
+      await this.appendRows('Audit Log!A:G', [rowData]);
+      console.log('Audit log entry added:', entry);
+    } catch (error) {
+      console.error('Error adding audit log:', error);
+      console.error('Failed audit log entry:', entry);
+    }
+  }
+
+  async getRecentAuditLogs(limit: number = 5): Promise<AuditLogEntry[]> {
+    try {
+      const values = await this.readSheet('Audit Log!A2:G');
+      
+      if (!values) return [];
+      
+      if (!values || !Array.isArray(values)) {
+        console.log('No appointments found in sheet');
+        return [];
+      }
+      
+      return values
+        .map(row => ({
+          timestamp: row[0],
+          eventType: row[1],
+          description: row[2],
+          user: row[3],
+          previousValue: row[4] || undefined,
+          newValue: row[5] || undefined,
+          systemNotes: row[6] || undefined
+        }))
+        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+        .slice(0, limit);
+        
+    } catch (error) {
+      console.error('Error reading audit logs:', error);
+      return [];
+    }
+  }
+
+  async getOfficeAppointments(officeId: string, date: string): Promise<AppointmentRecord[]> {
+    const startOfDay = new Date(date);
+    startOfDay.setHours(0, 0, 0, 0);
+    
+    const endOfDay = new Date(date);
+    endOfDay.setHours(23, 59, 59, 999);
+
+    const appointments = await this.getAppointments(
+      startOfDay.toISOString(),
+      endOfDay.toISOString()
+    );
+
+    if (officeId === 'all') {
+      return appointments;
+    }
+
+    return appointments.filter(appt => appt.officeId === officeId);
+  }
+
+  async addAppointment(appointment: AppointmentRecord): Promise<void> {
+    try {
+      const rowData = [
+        appointment.appointmentId,
+        appointment.clientId,
+        appointment.clientName,
+        appointment.clinicianId,
+        appointment.clinicianName,
+        appointment.officeId,
+        appointment.sessionType,
+        appointment.startTime,
+        appointment.endTime,
+        appointment.status,
+        appointment.lastUpdated,
+        appointment.source,
+        JSON.stringify(appointment.requirements || {}),
+        appointment.notes || ''
+      ];
+  
+      await this.appendRows('Appointments!A:N', [rowData]);
+  
+      await this.addAuditLog({
+        timestamp: new Date().toISOString(),
+        eventType: AuditEventType.APPOINTMENT_CREATED,
+        description: `Added appointment ${appointment.appointmentId}`,
+        user: 'SYSTEM',
+        systemNotes: JSON.stringify(appointment)
+      });
+  
+      await this.refreshCache('Appointments!A2:N');
+    } catch (error) {
+      console.error('Error adding appointment:', error);
+      throw new Error('Failed to add appointment');
+    }
+  }
+
+  // In sheets.ts
+async getAppointments(startDate: string, endDate: string): Promise<AppointmentRecord[]> {
+  try {
+    const values = await this.readSheet('Appointments!A2:N');
+    
+    if (!values || !Array.isArray(values)) {
+      console.log('No appointments found in sheet');
+      return [];
+    }
+
+    console.log('Processing appointments from sheet:', {
+      rowCount: values.length,
+      dateRange: { startDate, endDate }
+    });
+
+const mappedAppointments: AppointmentRecord[] = values
+  .map(row => {
+    try {
+      const standardizeOfficeId = (id: string): StandardOfficeId => {
+        const match = id.match(/^([A-Z])-([a-z])$/);
+        if (match) return id as StandardOfficeId;
+        return 'A-a' as StandardOfficeId;
+      };
+
+      const suggestedOffice = row[14] || row[5] || 'A-a'; // Use column O (suggestedOfficeId) or fall back to column F (officeId)
+      
+      const appointment: AppointmentRecord = {
+        appointmentId: row[0] || '',
+        clientId: row[1] || '',
+        clientName: row[2] || row[1] || '',
+        clinicianId: row[3] || '',
+        clinicianName: row[4] || row[3] || '',
+        officeId: standardizeOfficeId(suggestedOffice),
+        suggestedOfficeId: suggestedOffice,
+        sessionType: (row[6] || 'in-person') as 'in-person' | 'telehealth' | 'group' | 'family',
+        startTime: row[7] || '',
+        endTime: row[8] || '',
+        status: (row[9] || 'scheduled') as 'scheduled' | 'completed' | 'cancelled' | 'rescheduled',
+        lastUpdated: row[10] || new Date().toISOString(),
+        source: (row[11] || 'manual') as 'intakeq' | 'manual',
+        requirements: { accessibility: false, specialFeatures: [] },
+        notes: ''
+      };
+  
+        try {
+          const requirementsStr = row[12]?.toString().trim();
+          if (requirementsStr) {
+            // Remove any control characters and clean the JSON string
+            const cleanJson = requirementsStr
+              .replace(/[\u0000-\u0019]+/g, '')
+              .replace(/\s+/g, ' ')
+              .trim();
+            appointment.requirements = JSON.parse(cleanJson);
+          }
+        } catch (err) {
+          console.error('Error parsing requirements JSON:', err, {value: row[12]});
+        }
+  
+        // Add notes if present
+        if (row[13]) {
+          appointment.notes = row[13];
+        }
+  
+        return appointment;
+      } catch (error) {
+        console.error('Error mapping appointment row:', error, { row });
+        return null;
+      }
+    })
+      .filter((appt): appt is AppointmentRecord => appt !== null)
+      .filter(appt => {
+        try {
+          const apptDate = new Date(appt.startTime).toISOString().split('T')[0];
+          const targetDate = new Date(startDate).toISOString().split('T')[0];
+          
+          console.log('Filtering appointment:', {
+            id: appt.appointmentId,
+            date: apptDate,
+            target: targetDate,
+            match: apptDate === targetDate,
+            startTime: appt.startTime
+          });
+          
+          return apptDate === targetDate;
+        } catch (error) {
+          console.error('Error filtering appointment:', error, { appt });
+          return false;
+        }
+      });
+
+    console.log('Appointment processing complete:', {
+      totalFound: mappedAppointments.length,
+      dateRange: { startDate, endDate }
+    });
+
+    return mappedAppointments;
+  } catch (error) {
+    console.error('Error reading appointments:', error);
+    throw new Error('Failed to read appointments');
+  }
+}
+
+  async updateAppointment(appointment: AppointmentRecord): Promise<void> {
+    try {
+      const values = await this.readSheet('Appointments!A:A');
+      const appointmentRow = values?.findIndex(row => row[0] === appointment.appointmentId);
+
+      if (!values || !appointmentRow || appointmentRow < 0) {
+        throw new Error(`Appointment ${appointment.appointmentId} not found`);
+      }
+
+      const rowData = [
+        appointment.appointmentId,
+        appointment.clientId,
+        appointment.clinicianId,
+        appointment.officeId,
+        appointment.sessionType,
+        appointment.startTime,
+        appointment.endTime,
+        appointment.status,
+        appointment.lastUpdated,
+        appointment.source,
+        JSON.stringify(appointment.requirements || {}),
+        appointment.notes || ''
+      ];
+
+      await this.sheets.spreadsheets.values.update({
+        spreadsheetId: this.spreadsheetId,
+        range: `Appointments!A${appointmentRow + 1}:L${appointmentRow + 1}`,
+        valueInputOption: 'RAW',
+        requestBody: {
+          values: [rowData]
+        }
+      });
+
+      await this.addAuditLog({
+        timestamp: new Date().toISOString(),
+        eventType: AuditEventType.APPOINTMENT_UPDATED,
+        description: `Updated appointment ${appointment.appointmentId}`,
+        user: 'SYSTEM',
+        previousValue: JSON.stringify(values[appointmentRow]),
+        newValue: JSON.stringify(rowData)
+      });
+
+      await this.refreshCache('Appointments!A2:N');
+    } catch (error) {
+      console.error('Error updating appointment:', error);
+      throw new Error('Failed to update appointment');
+    }
+  }
+
+  // Add after the updateAppointment method:
+  async getAppointment(appointmentId: string): Promise<AppointmentRecord | null> {
+    try {
+      const values = await this.readSheet('Appointments!A2:N');
+      if (!values) return null;
+  
+      const appointmentRow = values.find(row => row[0] === appointmentId);
+      if (!appointmentRow) return null;
+  
+      return {
+        appointmentId: appointmentRow[0],
+        clientId: appointmentRow[1],
+        clientName: appointmentRow[2],
+        clinicianId: appointmentRow[3],
+        clinicianName: appointmentRow[4],
+        officeId: appointmentRow[5],
+        sessionType: appointmentRow[6] as 'in-person' | 'telehealth' | 'group' | 'family',
+        startTime: appointmentRow[7],
+        endTime: appointmentRow[8],
+        status: appointmentRow[9] as 'scheduled' | 'completed' | 'cancelled' | 'rescheduled',
+        lastUpdated: appointmentRow[10],
+        source: appointmentRow[11] as 'intakeq' | 'manual',
+        requirements: JSON.parse(appointmentRow[12] || '{}'),
+        notes: appointmentRow[13]
+      };
+    } catch (error) {
+      console.error('Error getting appointment:', error);
+      return null;
+    }
+  }
+
+
+async deleteAppointment(appointmentId: string): Promise<void> {
+  try {
+    const values = await this.readSheet('Appointments!A:A');
+    const appointmentRow = values?.findIndex(row => row[0] === appointmentId);
+
+    if (!values || !appointmentRow || appointmentRow < 0) {
+      throw new Error(`Appointment ${appointmentId} not found`);
+    }
+
+    await this.sheets.spreadsheets.values.clear({
+      spreadsheetId: this.spreadsheetId,
+      range: `Appointments!A${appointmentRow + 1}:L${appointmentRow + 1}`
+    });
+
+    await this.refreshCache('Appointments!A2:N');
+  } catch (error) {
+    console.error('Error deleting appointment:', error);
+    throw new Error('Failed to delete appointment');
+  }
+}
+
+  async updateClientPreference(preference: ClientPreference): Promise<void> {
+    try {
+      const values = await this.readSheet('Client Preferences!A:A');
+      const clientRow = values?.findIndex(row => row[0] === preference.clientId);
+      
+      const rowData = [
+        preference.clientId,
+        preference.name,
+        preference.email,
+        JSON.stringify(preference.mobilityNeeds),
+        JSON.stringify(preference.sensoryPreferences),
+        JSON.stringify(preference.physicalNeeds),
+        preference.roomConsistency.toString(),
+        JSON.stringify(preference.supportNeeds),
+        preference.additionalNotes || '',
+        new Date().toISOString(),
+        preference.preferredClinician || '',
+        preference.assignedOffice || ''
+      ];
+
+      if (clientRow && clientRow > 0) {
+        await this.sheets.spreadsheets.values.update({
+          spreadsheetId: this.spreadsheetId,
+          range: `Client Preferences!A${clientRow + 1}`,
+          valueInputOption: 'RAW',
+          requestBody: {
+            values: [rowData]
+          }
+        });
+      } else {
+        await this.appendRows('Client Preferences!A:L',
+          [rowData]);
+        }
+  
+        await this.addAuditLog({
+          timestamp: new Date().toISOString(),
+          eventType: AuditEventType.CLIENT_PREFERENCES_UPDATED,
+          description: `Updated preferences for client ${preference.clientId}`,
+          user: 'SYSTEM',
+          systemNotes: JSON.stringify(preference)
+        });
+  
+        await this.refreshCache('Client Preferences!A2:L');
+  
+      } catch (error) {
+        console.error('Error updating client preference:', error);
+        throw error;
+      }
+    }
+    
+    private extractMobilityNeeds(responses: Record<string, any>): string[] {
+      const needs: string[] = [];
+      
+      const mobilityField = responses['Do you use any mobility devices?'] || [];
+      if (Array.isArray(mobilityField)) {
+        if (mobilityField.includes('Wheelchair')) needs.push('wheelchair_access');
+        if (mobilityField.includes('Crutches')) needs.push('mobility_aid_crutches');
+        if (mobilityField.includes('Walking boot')) needs.push('mobility_aid_boot');
+      }
+      
+      const otherMobility = responses['Access needs related to mobility/disability (Please specify)'];
+      if (otherMobility) needs.push(otherMobility);
+      
+      return needs;
+    }
+    
+    private extractSensoryPreferences(responses: Record<string, any>): string[] {
+      const preferences: string[] = [];
+      
+      const sensoryField = responses['Do you experience sensory sensitivities?'] || [];
+      if (Array.isArray(sensoryField)) {
+        if (sensoryField.includes('Light sensitivity')) preferences.push('light_sensitive');
+        if (sensoryField.includes('Preference for only natural light')) preferences.push('natural_light');
+        if (sensoryField.includes('Auditory sensitivity')) preferences.push('sound_sensitive');
+      }
+      
+      const otherSensory = responses['Other (Please specify):'];
+      if (otherSensory) preferences.push(otherSensory);
+      
+      return preferences;
+    }
+    
+    private extractPhysicalNeeds(responses: Record<string, any>): string[] {
+      const needs: string[] = [];
+      
+      const physicalField = responses['Do you experience challenges with physical environment?'] || [];
+      if (Array.isArray(physicalField)) {
+        if (physicalField.includes('Seating support')) needs.push('seating_support');
+        if (physicalField.includes('Difficulty with stairs')) needs.push('no_stairs');
+        if (physicalField.includes('Need to see the door')) needs.push('door_visible');
+      }
+      
+      return needs;
+    }
+    
+    private extractRoomConsistency(responses: Record<string, any>): number {
+      const value = responses['Please indicate your comfort level with this possibility:'];
+      const consistencyMap: Record<string, number> = {
+        '1 - Strong preference for consistency': 5,
+        '2 - High preference for consistency': 4,
+        '3 - Neutral about room changes': 3,
+        '4 - Somewhat comfortable with room changes when needed': 2,
+        '5 - Very comfortable with room changes when needed': 1
+      };
+      
+      return consistencyMap[value] || 3;
+    }
+    
+    private extractSupportNeeds(responses: Record<string, any>): string[] {
+      const needs: string[] = [];
+      
+      const supportField = responses['Do you have support needs that involve any of the following?'] || [];
+      if (Array.isArray(supportField)) {
+        if (supportField.includes('Space for a service animal')) needs.push('service_animal');
+        if (supportField.includes('A support person present')) needs.push('support_person');
+        if (supportField.includes('The use of communication aids')) needs.push('communication_aids');
+      }
+      
+      return needs;
+    }
+
+    async processAccessibilityForm(formData: {
+      clientId: string;
+      clientName: string;
+      clientEmail: string;
+      formResponses: Record<string, any>;
+    }): Promise<void> {
+      try {
+        // Map form responses to client preferences structure
+        const preference: ClientPreference = {
+          clientId: formData.clientId,
+          name: formData.clientName,
+          email: formData.clientEmail,
+          mobilityNeeds: this.extractMobilityNeeds(formData.formResponses),
+          sensoryPreferences: this.extractSensoryPreferences(formData.formResponses),
+          physicalNeeds: this.extractPhysicalNeeds(formData.formResponses),
+          roomConsistency: this.extractRoomConsistency(formData.formResponses),
+          supportNeeds: this.extractSupportNeeds(formData.formResponses),
+          specialFeatures: [], // Will be derived from other preferences
+          additionalNotes: formData.formResponses['Is there anything else we should know about your space or accessibility needs?'] || '',
+          lastUpdated: new Date().toISOString(),
+          preferredClinician: '',
+          assignedOffice: ''
+        };
+    
+        // Update client preferences
+        await this.updateClientPreference(preference);
+    
+        await this.addAuditLog({
+          timestamp: new Date().toISOString(),
+          eventType: AuditEventType.CLIENT_PREFERENCES_UPDATED,
+          description: `Processed accessibility form for client ${formData.clientId}`,
+          user: 'SYSTEM',
+          systemNotes: JSON.stringify(formData.formResponses)
+        });
+    
+      } catch (error) {
+        console.error('Error processing accessibility form:', error);
+        await this.addAuditLog({
+          timestamp: new Date().toISOString(),
+          eventType: AuditEventType.SYSTEM_ERROR,
+          description: `Failed to process accessibility form for client ${formData.clientId}`,
+          user: 'SYSTEM',
+          systemNotes: error instanceof Error ? error.message : 'Unknown error'
+        });
+        throw error;
+      }
+    }
+
+    /**
+     * Force refresh cache for a specific range
+     */
+    async refreshCache(range: string): Promise<void> {
+      this.cache.invalidate(`sheet:${range}`);
+    }
+  
+    /**
+     * Clear all cached data
+     */
+    clearCache(): void {
+      this.cache.clearAll();
+    }
+  }// src/lib/intakeq/appointment-sync.ts
+
+import type { 
+  IntakeQAppointment, 
+  IntakeQWebhookPayload,
+  WebhookResponse 
+} from '@/types/webhooks';
+import type { GoogleSheetsService } from '@/lib/google/sheets';
+import type { EmailService } from '@/lib/email/service';
+import type { IntakeQService } from './service';
+import type { 
+  SchedulingRequest,
+  AppointmentRecord,
+  SessionType,
+  AlertSeverity,
+  StandardOfficeId
+} from '@/types/scheduling';
+import type { 
+  ValidationResponse, 
+  AppointmentConflict,
+  ApiResponse
+} from '@/types/api';
+import type { ClientPreference } from '@/types/sheets';
+import { AuditEventType } from '@/lib/google/sheets';
+import { OfficeAssignmentService } from '../scheduling/office-assignment';
+import { EmailTemplates } from '../email/templates';
+import { RecipientManagementService } from '@/lib/email/recipients';
+import { 
+  transformIntakeQAppointment, 
+  determineSessionType,
+  EmailPriority
+} from '../transformations/appointment-types';
+
+export class AppointmentSyncHandler {
+  private readonly recipientService: RecipientManagementService;
+
+  constructor(
+    private readonly sheetsService: GoogleSheetsService,
+    private readonly intakeQService: IntakeQService,
+    private readonly emailService: EmailService
+  ) {
+    this.recipientService = new RecipientManagementService(sheetsService);
+  }
+
+  /**
+   * Process appointment webhook events
+   */
+  async processAppointmentEvent(
+    payload: IntakeQWebhookPayload
+  ): Promise<WebhookResponse> {
+    if (!payload.Appointment) {
+      return { 
+        success: false, 
+        error: 'Missing appointment data' 
+      };
+    }
+
+    try {
+      // Log webhook receipt
+      await this.sheetsService.addAuditLog({
+        timestamp: new Date().toISOString(),
+        eventType: AuditEventType.WEBHOOK_RECEIVED,
+        description: `Received ${payload.Type} webhook`,
+        user: 'INTAKEQ_WEBHOOK',
+        systemNotes: JSON.stringify({
+          appointmentId: payload.Appointment.Id,
+          type: payload.Type,
+          clientId: payload.ClientId
+        })
+      });
+
+      switch (payload.Type) {
+        case 'AppointmentCreated':
+        case 'Appointment Created':
+          if (payload.Appointment.RecurrencePattern) {
+            return await this.handleRecurringAppointment(
+              payload.Appointment,
+              payload.Appointment.RecurrencePattern
+            );
+          }
+          return await this.handleNewAppointment(payload.Appointment);
+        
+        case 'AppointmentUpdated':
+        case 'Appointment Updated':
+        case 'AppointmentRescheduled':
+        case 'Appointment Rescheduled':
+          return await this.handleAppointmentUpdate(payload.Appointment);
+          
+        case 'AppointmentCancelled':
+        case 'Appointment Cancelled':
+          return await this.handleAppointmentCancellation(payload.Appointment);
+          
+        default:
+          return {
+            success: false,
+            error: `Unsupported event type: ${payload.Type}`
+          };
+      }
+    } catch (error) {
+      console.error('Appointment processing error:', error);
+      
+      // Log the error
+      await this.sheetsService.addAuditLog({
+        timestamp: new Date().toISOString(),
+        eventType: AuditEventType.SYSTEM_ERROR,
+        description: `Error processing appointment ${payload.Appointment.Id}`,
+        user: 'SYSTEM',
+        systemNotes: error instanceof Error ? error.message : 'Unknown error'
+      });
+
+      return {
+        success: false,
+        error: 'Appointment processing failed'
+      };
+    }
+  }
+
+  private async handleNewAppointment(
+    appointment: IntakeQAppointment
+  ): Promise<WebhookResponse> {
+    try {
+      // Convert to scheduling request format
+      const request = await this.convertToSchedulingRequest(appointment);
+      
+      // Validate scheduling
+      const validationResult = await this.validateScheduleInRealTime(request);
+      if (!validationResult.isValid) {
+        return {
+          success: false,
+          error: `Scheduling validation failed: ${validationResult.conflicts.map(c => c.description).join(', ')}`,
+          details: {
+            appointmentId: appointment.Id,
+            action: 'validation-failed',
+            conflicts: validationResult.conflicts
+          }
+        };
+      }
+
+      // Find optimal office
+      const [offices, rules, clinicians] = await Promise.all([
+        this.sheetsService.getOffices(),
+        this.sheetsService.getAssignmentRules(),
+        this.sheetsService.getClinicians()
+      ]);
+
+      const clientPreference = await this.getClientPreference(appointment.ClientId.toString());
+      
+      const assignmentService = new OfficeAssignmentService(
+        offices,
+        rules,
+        clinicians,
+        clientPreference
+      );
+
+      const assignmentResult = await assignmentService.findOptimalOffice(request);
+      
+      if (!assignmentResult.success) {
+        throw new Error(assignmentResult.error || 'Failed to find suitable office');
+      }
+
+      // Log the assignment
+      await this.sheetsService.addAuditLog({
+        timestamp: new Date().toISOString(),
+        eventType: AuditEventType.APPOINTMENT_CREATED,
+        description: `Assigned office ${assignmentResult.officeId} for appointment ${appointment.Id}`,
+        user: 'SYSTEM',
+        systemNotes: JSON.stringify({
+          appointmentId: appointment.Id,
+          officeId: assignmentResult.officeId,
+          clientId: appointment.ClientId
+        })
+      });
+
+      // Send notifications
+      await this.sendNotifications({
+        type: 'new',
+        appointment,
+        officeId: assignmentResult.officeId!
+      });
+
+      return {
+        success: true,
+        details: {
+          appointmentId: appointment.Id,
+          officeId: assignmentResult.officeId,
+          action: 'created'
+        }
+      };
+    } catch (error) {
+      console.error('Error handling new appointment:', error);
+      throw error;
+    }
+  }
+
+  private async handleAppointmentUpdate(
+    appointment: IntakeQAppointment
+  ): Promise<WebhookResponse> {
+    try {
+      const request = await this.convertToSchedulingRequest(appointment);
+      
+      // Validate scheduling
+      const validationResult = await this.validateScheduleInRealTime(request);
+      if (!validationResult.isValid) {
+        return {
+          success: false,
+          error: `Scheduling validation failed: ${validationResult.conflicts.map(c => c.description).join(', ')}`,
+          details: {
+            appointmentId: appointment.Id,
+            action: 'validation-failed',
+            conflicts: validationResult.conflicts
+          }
+        };
+      }
+
+      // Find optimal office for updated appointment
+      const [offices, rules, clinicians] = await Promise.all([
+        this.sheetsService.getOffices(),
+        this.sheetsService.getAssignmentRules(),
+        this.sheetsService.getClinicians()
+      ]);
+
+      const clientPreference = await this.getClientPreference(appointment.ClientId.toString());
+      
+      const assignmentService = new OfficeAssignmentService(
+        offices,
+        rules,
+        clinicians,
+        clientPreference
+      );
+
+      const assignmentResult = await assignmentService.findOptimalOffice(request);
+      
+      if (!assignmentResult.success) {
+        throw new Error(assignmentResult.error || 'Failed to find suitable office');
+      }
+
+      // Log the update
+      await this.sheetsService.addAuditLog({
+        timestamp: new Date().toISOString(),
+        eventType: AuditEventType.APPOINTMENT_UPDATED,
+        description: `Updated office assignment for appointment ${appointment.Id}`,
+        user: 'SYSTEM',
+        newValue: JSON.stringify({
+          appointmentId: appointment.Id,
+          officeId: assignmentResult.officeId,
+          clientId: appointment.ClientId
+        })
+      });
+
+      // Send notifications
+      await this.sendNotifications({
+        type: 'update',
+        appointment,
+        officeId: assignmentResult.officeId!
+      });
+
+      return {
+        success: true,
+        details: {
+          appointmentId: appointment.Id,
+          officeId: assignmentResult.officeId,
+          action: 'updated'
+        }
+      };
+    } catch (error) {
+      console.error('Error handling appointment update:', error);
+      throw error;
+    }
+  }
+
+  private async handleAppointmentCancellation(
+    appointment: IntakeQAppointment
+  ): Promise<WebhookResponse> {
+    try {
+      // Log cancellation
+      await this.sheetsService.addAuditLog({
+        timestamp: new Date().toISOString(),
+        eventType: AuditEventType.APPOINTMENT_CANCELLED,
+        description: `Cancelled appointment ${appointment.Id}`,
+        user: 'SYSTEM',
+        systemNotes: JSON.stringify({
+          appointmentId: appointment.Id,
+          clientId: appointment.ClientId,
+          reason: appointment.CancellationReason || 'No reason provided'
+        })
+      });
+
+      // Send notifications
+      await this.sendNotifications({
+        type: 'cancellation',
+        appointment
+      });
+
+      return {
+        success: true,
+        details: {
+          appointmentId: appointment.Id,
+          action: 'cancelled'
+        }
+      };
+    } catch (error) {
+      console.error('Error handling appointment cancellation:', error);
+      throw error;
+    }
+  }
+
+  private async handleRecurringAppointment(
+    appointment: IntakeQAppointment,
+    recurrencePattern: {
+      frequency: 'weekly' | 'biweekly' | 'monthly';
+      occurrences: number;
+      endDate?: string;
+    }
+  ): Promise<WebhookResponse> {
+    try {
+      let currentDate = new Date(appointment.StartDateIso);
+      const endDate = recurrencePattern.endDate 
+        ? new Date(recurrencePattern.endDate)
+        : null;
+      
+      let occurrenceCount = 0;
+      const results: WebhookResponse[] = [];
+      
+      while (
+        occurrenceCount < recurrencePattern.occurrences && 
+        (!endDate || currentDate <= endDate)
+      ) {
+        // Create appointment instance
+        const instanceDate = new Date(currentDate);
+        const appointmentInstance = {
+          ...appointment,
+          Id: `${appointment.Id}-${occurrenceCount + 1}`,
+          StartDateIso: instanceDate.toISOString(),
+          EndDateIso: new Date(
+            instanceDate.getTime() + (appointment.Duration * 60000)
+          ).toISOString()
+        };
+
+        // Process individual instance
+        const result = await this.handleNewAppointment(appointmentInstance);
+        results.push(result);
+
+        if (!result.success) {
+          break;
+        }
+
+        // Advance to next occurrence
+        switch (recurrencePattern.frequency) {
+          case 'weekly':
+            currentDate.setDate(currentDate.getDate() + 7);
+            break;
+          case 'biweekly':
+            currentDate.setDate(currentDate.getDate() + 14);
+            break;
+          case 'monthly':
+            currentDate.setMonth(currentDate.getMonth() + 1);
+            break;
+        }
+
+        occurrenceCount++;
+      }
+
+      const failedResults = results.filter(r => !r.success);
+      
+      if (failedResults.length > 0) {
+        return {
+          success: false,
+          error: 'Some recurring appointments failed to schedule',
+          details: {
+            appointmentId: appointment.Id,
+            action: 'recurring-partial',
+            successful: results.length - failedResults.length,
+            failed: failedResults.length,
+            failures: failedResults
+          }
+        };
+      }
+
+      return {
+        success: true,
+        details: {
+          appointmentId: appointment.Id,
+          action: 'recurring-created',
+          occurrences: results.length
+        }
+      };
+    } catch (error) {
+      console.error('Error handling recurring appointment:', error);
+      throw error;
+    }
+  }
+
+  // Part of appointment-sync.ts
+
+// Part of appointment-sync.ts
+
+private async sendNotifications(options: {
+  type: 'new' | 'update' | 'cancellation';
+  appointment: IntakeQAppointment;
+  officeId?: StandardOfficeId;
+}): Promise<void> {
+  const { type, appointment, officeId } = options;
+
+  // Get recipients based on notification type
+  const recipients = await this.emailService.getClinicianRecipients();
+
+  // Transform the appointment
+  const transformedAppointment = transformIntakeQAppointment(appointment);
+
+  // Create appropriate template
+  const standardizeOfficeId = (id?: string): StandardOfficeId => {
+    if (!id) return 'A-a' as StandardOfficeId;
+    const match = id.match(/^([A-Z])-([a-z])$/);
+    if (match) return id as StandardOfficeId;
+    return 'A-a' as StandardOfficeId;
+  };
+  
+  const template = EmailTemplates.dailySchedule({
+    date: new Date(appointment.StartDateIso).toISOString().split('T')[0],
+    appointments: [transformedAppointment],
+    alerts: [{
+      type: 'appointment',
+      message: `${type} appointment: ${appointment.ClientName}`,
+      severity: type === 'new' ? 'low' : 'high'
+    }]
+  });
+}
+
+  public async validateScheduleInRealTime(
+    request: SchedulingRequest
+  ): Promise<ValidationResponse> {
+    try {
+      // Get existing appointments for the date from IntakeQ
+      const requestDate = new Date(request.dateTime);
+      const startOfDay = new Date(requestDate);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(requestDate);
+      endOfDay.setHours(23, 59, 59, 999);
+
+      const existingAppointments = await this.intakeQService.getAppointments(
+        startOfDay.toISOString(),
+        endOfDay.toISOString()
+      );
+
+      const conflicts: AppointmentConflict[] = [];
+
+      // Check clinician availability
+      const clinicianBookings = existingAppointments.filter(
+        booking => booking.PractitionerId === request.clinicianId
+      );
+
+      const requestStart = new Date(request.dateTime);
+      const requestEnd = new Date(
+        requestStart.getTime() + (request.duration * 60000)
+      );
+
+      // Check for conflicts
+      for (const booking of clinicianBookings) {
+        const bookingStart = new Date(booking.StartDateIso);
+        const bookingEnd = new Date(booking.EndDateIso);
+
+        if (requestStart < bookingEnd && requestEnd > bookingStart) {
+          conflicts.push({
+            type: 'double-booking',
+            description: 'Clinician is already booked during this time',
+            severity: 'high',
+            appointmentIds: [booking.Id]
+          });
+        }
+      }
+
+      return {
+        isValid: conflicts.length === 0,
+        conflicts
+      };
+    } catch (error) {
+      console.error('Validation error:', error);
+      throw error;
+    }
+  }
+
+  private async getClientPreference(
+    clientId: string
+  ): Promise<ClientPreference | undefined> {
+    const preferences = await this.sheetsService.getClientPreferences();
+    return preferences.find(pref => pref.clientId === clientId);
+  }
+
+  private async convertToSchedulingRequest(
+    appointment: IntakeQAppointment
+  ): Promise<SchedulingRequest> {
+    try {
+      // Find clinician by IntakeQ ID
+      const clinicians = await this.sheetsService.getClinicians();
+      const clinician = clinicians.find(c => 
+        c.intakeQPractitionerId === appointment.PractitionerId
+      );
+
+      if (!clinician) {
+        throw new Error(`No clinician found for IntakeQ ID: ${appointment.PractitionerId}`);
+      }
+
+      // Get client preferences to determine requirements
+      const clientPrefs = await this.getClientPreference(appointment.ClientId.toString());
+      
+      // Set base requirements from client preferences
+      const mobilityNeeds = clientPrefs?.mobilityNeeds || [];
+      const sensoryPrefs = clientPrefs?.sensoryPreferences || [];
+      const physicalNeeds = clientPrefs?.physicalNeeds || [];
+
+      const standardizeOfficeId = (officeId?: string): StandardOfficeId | undefined => {
+        if (!officeId) return undefined;
+        const match = officeId.match(/^([A-Z])-([a-z])$/);
+        if (match) return officeId as StandardOfficeId;
+        return undefined;
+      };
+      
+      const requirements = {
+        accessibility: Array.isArray(mobilityNeeds) && mobilityNeeds.length > 0,
+        specialFeatures: [
+          ...(Array.isArray(sensoryPrefs) ? sensoryPrefs : []),
+          ...(Array.isArray(physicalNeeds) ? physicalNeeds : [])
+        ],
+        roomPreference: standardizeOfficeId(clientPrefs?.assignedOffice)
+      };
+
+      return {
+        clientId: appointment.ClientId.toString(),
+        clinicianId: clinician.clinicianId,
+        dateTime: appointment.StartDateIso,
+        duration: appointment.Duration,
+        sessionType: this.determineSessionType(appointment),
+        requirements
+      };
+    } catch (error) {
+      // Log conversion error
+      await this.sheetsService.addAuditLog({
+        timestamp: new Date().toISOString(),
+        eventType: AuditEventType.SYSTEM_ERROR,
+        description: `Error converting IntakeQ appointment ${appointment.Id}`,
+        user: 'SYSTEM',
+        systemNotes: error instanceof Error ? error.message : 'Unknown error'
+      });
+      throw error;
+    }
+  }
+
+  private determineSessionType(
+    appointment: IntakeQAppointment
+  ): 'in-person' | 'telehealth' | 'group' | 'family' {
+    const serviceName = appointment.ServiceName.toLowerCase();
+    
+    // Map commonly used telehealth terms
+    if (serviceName.match(/tele(health|therapy|med|session)|virtual|remote|video/)) {
+      return 'telehealth';
+    }
+  
+    // Map group therapy variations
+    if (serviceName.match(/group|workshop|class|seminar/)) {
+      return 'group';
+    }
+  
+    // Map family therapy variations
+    if (serviceName.match(/family|couples|relationship|parental|parent-child/)) {
+      return 'family';
+    }
+  
+    // Check service metadata if available
+    if (appointment.ServiceId) {
+      // Store common service IDs for quick lookup
+      const TELEHEALTH_SERVICES = ['64a319db9173cb32157ea065', '64a319db9173cb32157ea066'];
+      const GROUP_SERVICES = ['64a319db9173cb32157ea067'];
+      const FAMILY_SERVICES = ['64a319db9173cb32157ea068'];
+  
+      if (TELEHEALTH_SERVICES.includes(appointment.ServiceId)) {
+        return 'telehealth';
+      }
+      if (GROUP_SERVICES.includes(appointment.ServiceId)) {
+        return 'group';
+      }
+      if (FAMILY_SERVICES.includes(appointment.ServiceId)) {
+        return 'family';
+      }
+    }
+  
+    // Default to in-person if no other matches
+    return 'in-person';
+  }
+}// src/lib/email/templates.ts
+
+import type { AppointmentRecord, StandardOfficeId } from '@/types/scheduling';
+import { format } from 'date-fns';
+
+interface EmailTemplate {
+  subject: string;
+  html: string;
+  text: string;
+}
+
+interface EmailTemplateParams {
+  date: string;
+  appointments: AppointmentRecord[];
+  alerts: Array<{ type: string; message: string; severity: 'high' | 'medium' | 'low' }>;
+  officeUtilization?: Map<StandardOfficeId, {
+    totalSlots: number;
+    bookedSlots: number;
+    specialNotes?: string[];
+  }>;
+}
+
+export class EmailTemplates {
+  static dailySchedule({
+    date,
+    appointments = [], // Default to empty array
+    alerts = [],      // Default to empty array
+    officeUtilization
+  }: EmailTemplateParams): EmailTemplate {
+    // Ensure we have arrays to work with
+    const safeAppointments = Array.isArray(appointments) ? appointments : [];
+    const safeAlerts = Array.isArray(alerts) ? alerts : [];
+
+    // Group appointments by clinician
+    const appointmentsByClinicianId = safeAppointments.reduce((acc, appointment) => {
+      if (!appointment?.clinicianId) return acc; // Skip invalid appointments
+      
+      const clinicianId = appointment.clinicianId;
+      if (!acc[clinicianId]) {
+        acc[clinicianId] = {
+          clinicianName: appointment.clinicianName || 'Unknown Clinician',
+          lastName: appointment.clinicianName?.split(' ').pop() || 'Unknown',
+          appointments: []
+        };
+      }
+      acc[clinicianId].appointments.push(appointment);
+      return acc;
+    }, {} as Record<string, { 
+      clinicianName: string; 
+      lastName: string;
+      appointments: AppointmentRecord[] 
+    }>);
+
+    // Sort clinicians by last name
+    const sortedClinicians = Object.values(appointmentsByClinicianId)
+      .sort((a, b) => a.lastName.localeCompare(b.lastName));
+
+    // Sort appointments for each clinician by time
+    sortedClinicians.forEach(clinicianData => {
+      clinicianData.appointments.sort((a, b) => {
+        const timeA = new Date(a.startTime).getTime();
+        const timeB = new Date(b.startTime).getTime();
+        return timeA - timeB;
+      });
+    });
+
+    // Format dates for header ensuring EST timezone
+    const tomorrow = new Date(date);
+tomorrow.setDate(tomorrow.getDate() + 1);
+const formattedDate = format(tomorrow, 'EEEE, MMMM d, yyyy');
+
+    // Build HTML content
+    const html = `
+      <div style="font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto;">
+        <h1 style="color: #333; margin-bottom: 5px;">Today's Schedule & Office Assignments</h1>
+        <h2 style="color: #666; font-size: 1.2em; margin-top: 0;">${formattedDate}</h2>
+        
+        ${safeAlerts.length > 0 ? `
+          <div style="margin: 20px 0;">
+            <h2 style="color: #333;">Alerts</h2>
+            ${safeAlerts.map(alert => `
+              <div style="
+                padding: 10px; 
+                margin: 5px 0; 
+                background-color: ${alert.severity === 'high' ? '#ffe6e6' : 
+                                  alert.severity === 'medium' ? '#fff3e6' : 
+                                  '#e6ffe6'};
+                border-radius: 4px;"
+              >
+                <strong>${alert.type}:</strong> ${alert.message}
+              </div>
+            `).join('')}
+          </div>
+        ` : ''}
+
+        ${sortedClinicians.map(({ clinicianName, appointments }) => `
+          <div style="margin: 30px 0;">
+            <h2 style="color: #333; border-bottom: 2px solid #eee; padding-bottom: 5px;">
+              ${clinicianName}
+            </h2>
+            <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
+              <thead>
+                <tr style="background-color: #f5f5f5;">
+                  <th style="padding: 8px; text-align: left; border: 1px solid #ddd;">Time</th>
+                  <th style="padding: 8px; text-align: left; border: 1px solid #ddd;">Client</th>
+                  <th style="padding: 8px; text-align: left; border: 1px solid #ddd;">Type</th>
+                  <th style="padding: 8px; text-align: left; border: 1px solid #ddd;">Office</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${appointments.map(appt => `
+                  <tr>
+                    <td style="padding: 8px; border: 1px solid #ddd;">
+                      ${format(new Date(appt.startTime), 'h:mm a')} - ${format(new Date(appt.endTime), 'h:mm a')}
+                    </td>
+                    <td style="padding: 8px; border: 1px solid #ddd;">${appt.clientName || 'Unknown Client'}</td>
+                    <td style="padding: 8px; border: 1px solid #ddd;">${appt.sessionType || 'Unknown Type'}</td>
+                    <td style="padding: 8px; border: 1px solid #ddd;">${appt.suggestedOfficeId}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        `).join('')}
+        
+        <div style="color: #666; font-size: 12px; margin-top: 30px; border-top: 1px solid #eee; padding-top: 10px;">
+          Generated ${format(new Date(), 'M/d/yyyy, h:mm:ss a')}
+        </div>
+      </div>
+    `;
+
+    // Plain text version
+    const text = `Today's Schedule & Office Assignments\n${formattedDate}\n\n` +
+      (safeAlerts.length > 0 ? `Alerts:\n${safeAlerts.map(alert => 
+        `${alert.type}: ${alert.message}`).join('\n')}\n\n` : '') +
+      sortedClinicians.map(({ clinicianName, appointments }) => 
+        `${clinicianName}\n${'-'.repeat(clinicianName.length)}\n` +
+        appointments.map(appt => 
+          `${format(new Date(appt.startTime), 'h:mm a')} - ${format(new Date(appt.endTime), 'h:mm a')}: ` +
+          `${appt.clientName || 'Unknown Client'} (${appt.sessionType || 'Unknown Type'}) - ` +
+          `Office: ${appt.suggestedOfficeId}`
+        ).join('\n')
+      ).join('\n\n') +
+      `\n\nGenerated ${format(new Date(), 'M/d/yyyy, h:mm:ss a')}`;
+
+    return {
+      subject: `Today's Schedule & Office Assignments - ${formattedDate}`,
+      html,
+      text
+    };
+  }
+}

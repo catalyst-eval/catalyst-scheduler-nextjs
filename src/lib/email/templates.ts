@@ -1,18 +1,32 @@
 // src/lib/email/templates.ts
 
-import type { AppointmentRecord } from '@/types/scheduling';
+import type { AppointmentRecord, StandardOfficeId } from '@/types/scheduling';
 import { format } from 'date-fns';
+
+interface EmailTemplate {
+  subject: string;
+  html: string;
+  text: string;
+}
+
+interface EmailTemplateParams {
+  date: string;
+  appointments: AppointmentRecord[];
+  alerts: Array<{ type: string; message: string; severity: 'high' | 'medium' | 'low' }>;
+  officeUtilization?: Map<StandardOfficeId, {
+    totalSlots: number;
+    bookedSlots: number;
+    specialNotes?: string[];
+  }>;
+}
 
 export class EmailTemplates {
   static dailySchedule({
     date,
     appointments = [], // Default to empty array
-    alerts = []       // Default to empty array
-  }: {
-    date: string;
-    appointments: AppointmentRecord[];
-    alerts: Array<{ type: string; message: string; severity: 'high' | 'medium' | 'low' }>;
-  }) {
+    alerts = [],      // Default to empty array
+    officeUtilization
+  }: EmailTemplateParams): EmailTemplate {
     // Ensure we have arrays to work with
     const safeAppointments = Array.isArray(appointments) ? appointments : [];
     const safeAlerts = Array.isArray(alerts) ? alerts : [];
@@ -50,8 +64,10 @@ export class EmailTemplates {
       });
     });
 
-    // Format dates for header
-    const formattedDate = format(new Date(date), 'EEEE, MMMM d, yyyy');
+    // Format dates for header ensuring EST timezone
+    const tomorrow = new Date(date);
+tomorrow.setDate(tomorrow.getDate() + 1);
+const formattedDate = format(tomorrow, 'EEEE, MMMM d, yyyy');
 
     // Build HTML content
     const html = `
@@ -99,7 +115,7 @@ export class EmailTemplates {
                     </td>
                     <td style="padding: 8px; border: 1px solid #ddd;">${appt.clientName || 'Unknown Client'}</td>
                     <td style="padding: 8px; border: 1px solid #ddd;">${appt.sessionType || 'Unknown Type'}</td>
-                    <td style="padding: 8px; border: 1px solid #ddd;">${appt.officeId}</td>
+                    <td style="padding: 8px; border: 1px solid #ddd;">${appt.suggestedOfficeId || 'TBD'}</td>
                   </tr>
                 `).join('')}
               </tbody>
@@ -122,7 +138,7 @@ export class EmailTemplates {
         appointments.map(appt => 
           `${format(new Date(appt.startTime), 'h:mm a')} - ${format(new Date(appt.endTime), 'h:mm a')}: ` +
           `${appt.clientName || 'Unknown Client'} (${appt.sessionType || 'Unknown Type'}) - ` +
-          `Office: ${appt.officeId}`
+          `Office: ${appt.suggestedOfficeId}`
         ).join('\n')
       ).join('\n\n') +
       `\n\nGenerated ${format(new Date(), 'M/d/yyyy, h:mm:ss a')}`;

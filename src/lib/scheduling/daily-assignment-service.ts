@@ -3,7 +3,8 @@
 import { toEST, getESTDayRange, isSameESTDay } from '../util/date-helpers';
 import type { 
   AppointmentRecord,
-  SchedulingConflict 
+  SchedulingConflict,
+  StandardOfficeId
 } from '@/types/scheduling';
 import type { 
   SheetOffice, 
@@ -22,10 +23,10 @@ interface DailyScheduleSummary {
     type: 'double-booking' | 'accessibility' | 'capacity';
     description: string;
     severity: 'high' | 'medium' | 'low';
-    officeId?: string;
+    officeId?: StandardOfficeId;
     appointmentIds?: string[];
   }>;
-  officeUtilization: Map<string, {
+  officeUtilization: Map<StandardOfficeId, {
     totalSlots: number;
     bookedSlots: number;
     specialNotes?: string[];
@@ -42,6 +43,17 @@ export class DailyAssignmentService {
     private readonly sheetsService: GoogleSheetsService,
     private readonly intakeQService: IntakeQService
   ) {}
+
+  private getTomorrowDate(): string {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(0, 0, 0, 0);
+    return tomorrow.toISOString().split('T')[0];
+  }
+  
+  async generateTomorrowSummary(): Promise<DailyScheduleSummary> {
+    return this.generateDailySummary(this.getTomorrowDate());
+  }
 
   async generateDailySummary(date: string): Promise<DailyScheduleSummary> {
     try {
@@ -86,11 +98,12 @@ const endOfDay = range.end;
         const localAppt = localAppointments.find(appt => appt.appointmentId === intakeQAppt.Id);
         const clinician = clinicianMap.get(intakeQAppt.PractitionerId);
 
-        // If no local appointment exists, assign an office
+        // Get suggested office from local appointment or calculate new one
+        let suggestedOfficeId = localAppt?.suggestedOfficeId;
         let officeId = localAppt?.officeId;
         let notes = localAppt?.notes;
 
-        if (!officeId && clinician) {
+        if (!suggestedOfficeId && clinician) {
           const assignmentService = new OfficeAssignmentService(
             offices,
             await this.sheetsService.getAssignmentRules(),
@@ -106,18 +119,26 @@ const endOfDay = range.end;
           });
 
           if (result.success) {
+            suggestedOfficeId = result.officeId;
             officeId = result.officeId;
             notes = result.notes;
           }
         }
 
+        const standardizeOfficeId = (id: string): StandardOfficeId => {
+          const match = id.match(/^([A-Z])-([a-z])$/);
+          if (match) return id as StandardOfficeId;
+          return 'A-a' as StandardOfficeId; // Default office if format doesn't match
+        };
+        
         return {
           appointmentId: intakeQAppt.Id,
           clientId: intakeQAppt.ClientId.toString(),
           clientName: intakeQAppt.ClientName,
           clinicianId: clinicianMap.get(intakeQAppt.PractitionerId)?.clinicianId || intakeQAppt.PractitionerId,
-    clinicianName: clinicianMap.get(intakeQAppt.PractitionerId)?.name || 'Unknown',
-          officeId: officeId || '',
+          clinicianName: clinicianMap.get(intakeQAppt.PractitionerId)?.name || 'Unknown',
+          officeId: standardizeOfficeId(officeId || 'A-a'),
+          suggestedOfficeId: officeId,
           sessionType: this.determineSessionType(intakeQAppt.ServiceName),
           startTime: intakeQAppt.StartDateIso,
           endTime: intakeQAppt.EndDateIso,
@@ -294,11 +315,17 @@ const endOfDay = range.end;
           type: 'accessibility',
           description: `${appt1.clientName} requires accessible office but assigned to ${appt1.officeId}`,
           severity: 'high',
-          officeId: appt1.officeId,
+          officeId: this.standardizeOfficeId(appt1.officeId),
           appointmentIds: [appt1.appointmentId]
         });
       }
     });
+  }
+
+  private standardizeOfficeId(id: string): StandardOfficeId {
+    const match = id.match(/^([A-Z])-([a-z])$/);
+    if (match) return id as StandardOfficeId;
+    return 'A-a' as StandardOfficeId;
   }
 
   private calculateOfficeUtilization(
@@ -323,7 +350,7 @@ const endOfDay = range.end;
         notes.push('High utilization');
       }
 
-      summary.officeUtilization.set(office.officeId, {
+      summary.officeUtilization.set(this.standardizeOfficeId(office.officeId), {
         totalSlots,
         bookedSlots,
         specialNotes: notes

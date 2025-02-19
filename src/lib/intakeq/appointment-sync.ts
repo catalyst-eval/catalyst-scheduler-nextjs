@@ -12,7 +12,8 @@ import type {
   SchedulingRequest,
   AppointmentRecord,
   SessionType,
-  AlertSeverity
+  AlertSeverity,
+  StandardOfficeId
 } from '@/types/scheduling';
 import type { 
   ValidationResponse, 
@@ -396,7 +397,7 @@ export class AppointmentSyncHandler {
 private async sendNotifications(options: {
   type: 'new' | 'update' | 'cancellation';
   appointment: IntakeQAppointment;
-  officeId?: string;
+  officeId?: StandardOfficeId;
 }): Promise<void> {
   const { type, appointment, officeId } = options;
 
@@ -407,17 +408,16 @@ private async sendNotifications(options: {
   const transformedAppointment = transformIntakeQAppointment(appointment);
 
   // Create appropriate template
+  const standardizeOfficeId = (id?: string): StandardOfficeId => {
+    if (!id) return 'A-a' as StandardOfficeId;
+    const match = id.match(/^([A-Z])-([a-z])$/);
+    if (match) return id as StandardOfficeId;
+    return 'A-a' as StandardOfficeId;
+  };
+  
   const template = EmailTemplates.dailySchedule({
     date: new Date(appointment.StartDateIso).toISOString().split('T')[0],
     appointments: [transformedAppointment],
-    conflicts: [],
-    officeUtilization: new Map([
-      [officeId || '', {
-        totalSlots: 8, // Default to 8 hour day
-        bookedSlots: 1,
-        specialNotes: []
-      }]
-    ]),
     alerts: [{
       type: 'appointment',
       message: `${type} appointment: ${appointment.ClientName}`,
@@ -508,13 +508,20 @@ private async sendNotifications(options: {
       const sensoryPrefs = clientPrefs?.sensoryPreferences || [];
       const physicalNeeds = clientPrefs?.physicalNeeds || [];
 
+      const standardizeOfficeId = (officeId?: string): StandardOfficeId | undefined => {
+        if (!officeId) return undefined;
+        const match = officeId.match(/^([A-Z])-([a-z])$/);
+        if (match) return officeId as StandardOfficeId;
+        return undefined;
+      };
+      
       const requirements = {
         accessibility: Array.isArray(mobilityNeeds) && mobilityNeeds.length > 0,
         specialFeatures: [
           ...(Array.isArray(sensoryPrefs) ? sensoryPrefs : []),
           ...(Array.isArray(physicalNeeds) ? physicalNeeds : [])
         ],
-        roomPreference: clientPrefs?.assignedOffice || undefined
+        roomPreference: standardizeOfficeId(clientPrefs?.assignedOffice)
       };
 
       return {

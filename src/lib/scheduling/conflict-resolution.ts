@@ -3,7 +3,8 @@
 import type { 
   SessionType,
   SchedulingRequest,
-  SchedulingConflict
+  SchedulingConflict,
+  StandardOfficeId
 } from '@/types/scheduling';
 
 import type { SheetOffice } from '@/types/sheets';
@@ -13,6 +14,12 @@ export class ConflictResolutionService {
     private readonly availableOffices: SheetOffice[],
     private readonly existingBookings: Map<string, SchedulingRequest[]> // officeId -> bookings
   ) {}
+
+  private standardizeOfficeId(id: string): StandardOfficeId {
+    const match = id.match(/^([A-Z])-([a-z])$/);
+    if (match) return id as StandardOfficeId;
+    return 'A-a' as StandardOfficeId;
+  }
 
   /**
    * Get session priority level
@@ -52,7 +59,7 @@ export class ConflictResolutionService {
       if (requestStart < bookingEnd && requestEnd > bookingStart) {
         // We have a conflict
         const conflict: SchedulingConflict = {
-          officeId,
+          officeId: this.standardizeOfficeId(officeId),
           existingBooking: booking,
           resolution: await this.resolveConflict(booking, request)
         };
@@ -69,7 +76,7 @@ export class ConflictResolutionService {
   private async resolveConflict(
     existingBooking: SchedulingRequest,
     newRequest: SchedulingRequest
-  ): Promise<{ type: 'relocate' | 'cannot-relocate'; reason: string; newOfficeId?: string }> {
+  ): Promise<{ type: 'relocate' | 'cannot-relocate'; reason: string; newOfficeId?: StandardOfficeId }> {
     const existingPriority = this.getSessionPriority(existingBooking.sessionType);
     const newPriority = this.getSessionPriority(newRequest.sessionType);
 
@@ -87,7 +94,7 @@ export class ConflictResolutionService {
       return {
         type: 'relocate',
         reason: `${newRequest.sessionType} takes priority, relocating existing ${existingBooking.sessionType} to ${alternativeOffice.officeId}`,
-        newOfficeId: alternativeOffice.officeId
+        newOfficeId: this.standardizeOfficeId(alternativeOffice.officeId)
       };
     }
 

@@ -14,6 +14,7 @@ export interface AppointmentRecord {
   clinicianId: string;
   clinicianName: string;
   officeId: StandardOfficeId;
+  suggestedOfficeId?: string;
   sessionType: SessionType;
   startTime: string;
   endTime: string;
