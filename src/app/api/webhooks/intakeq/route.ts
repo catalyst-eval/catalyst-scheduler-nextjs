@@ -10,7 +10,6 @@ import { EmailService } from '@/lib/email/service';
 export async function POST(req: NextRequest) {
   try {
     const payload = await req.json();
-    const signature = req.headers.get('X-IntakeQ-Signature') || '';
 
     console.log('Received webhook:', { 
       type: payload.EventType || payload.Type,
@@ -40,6 +39,8 @@ export async function POST(req: NextRequest) {
       sheetsService
     );
 
+    console.log('Services initialized');
+
     // Create appointment sync handler
     const syncHandler = new AppointmentSyncHandler(
       sheetsService,
@@ -47,22 +48,12 @@ export async function POST(req: NextRequest) {
       emailService
     );
 
-    // Validate webhook signature
-    if (!await intakeQService.validateWebhookSignature(
-      JSON.stringify(payload),
-      signature
-    )) {
-      return NextResponse.json(
-        { success: false, error: 'Invalid signature' },
-        { status: 401 }
-      );
-    }
-
     // Handle the webhook event
     // Use either EventType or Type (for backward compatibility)
     const eventType = payload.EventType || payload.Type;
     
     if (!eventType) {
+      console.warn('Missing event type in webhook payload');
       return NextResponse.json(
         { 
           success: false, 
@@ -73,7 +64,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    console.log('Processing webhook event:', eventType);
+
     const result = await syncHandler.processAppointmentEvent(payload);
+
+    console.log('Webhook event processed:', result);
 
     if (!result.success) {
       return NextResponse.json({
