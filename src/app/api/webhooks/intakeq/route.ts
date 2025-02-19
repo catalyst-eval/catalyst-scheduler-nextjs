@@ -1,94 +1,105 @@
 // src/app/api/webhooks/intakeq/route.ts
 
-import { NextResponse } from 'next/server';
-import { initializeGoogleSheets } from '@/lib/google/auth';
+import { NextRequest, NextResponse } from 'next/server';
+import { GoogleSheetsService } from '@/lib/google/sheets';
 import { IntakeQService } from '@/lib/intakeq/service';
+import { getGoogleAuthCredentials } from '@/lib/google/auth';
 import { AppointmentSyncHandler } from '@/lib/intakeq/appointment-sync';
-import { EnhancedWebhookHandler } from '@/lib/intakeq/webhook-handler';
-import { initializeEmailService } from '@/lib/email/config';
+import { EmailService } from '@/lib/email/service';
 
-export async function POST(request: Request) {
+export async function POST(req: NextRequest) {
   try {
-    // Get raw body
-    const rawBody = await request.text();
+    const payload = await req.json();
+    const signature = req.headers.get('X-IntakeQ-Signature') || '';
 
-    console.log('Webhook request received:', {
-      bodyLength: rawBody.length,
-      rawContent: rawBody
+    console.log('Received webhook:', { 
+      type: payload.EventType || payload.Type,
+      clientId: payload.ClientId,
+      appointmentId: payload.Appointment?.Id
     });
 
     // Initialize services
-    const sheetsService = await initializeGoogleSheets();
-    console.log('Sheets service initialized');
-
-    const intakeQService = new IntakeQService(
-      process.env.INTAKEQ_API_KEY!,
-      sheetsService
-    );
-    console.log('IntakeQ service initialized');
-
-    const emailService = await initializeEmailService(sheetsService);
-    console.log('Email service initialized');
-
-    // Attempt to parse with detailed error logging
-    let payload;
-    try {
-      payload = JSON.parse(rawBody);
-      console.log('Parsed payload:', {
-        type: payload.Type,
-        clientId: payload.ClientId,
-        hasResponses: !!payload.responses
-      });
-    } catch (error) {
-      if (error instanceof Error) {
-        console.error('JSON Parse Error:', {
-          error: error.message,
-          rawData: rawBody.substring(0, 200) + '...'
-        });
-      }
-      throw error;
+    const credentials = getGoogleAuthCredentials();
+    const spreadsheetId = process.env.GOOGLE_SHEETS_SPREADSHEET_ID;
+    
+    if (!spreadsheetId) {
+      throw new Error('Missing spreadsheet ID configuration');
     }
 
-    // Initialize handlers with correct service types
-    const appointmentSync = new AppointmentSyncHandler(
+    const sheetsService = new GoogleSheetsService(credentials, spreadsheetId);
+    
+    const intakeQService = new IntakeQService(
+      process.env.INTAKEQ_API_KEY || '',
+      sheetsService
+    );
+
+    const emailService = new EmailService(
+      process.env.SENDGRID_API_KEY || '',
+      process.env.EMAIL_FROM_ADDRESS || '',
+      process.env.EMAIL_FROM_NAME || '',
+      sheetsService
+    );
+
+    // Create appointment sync handler
+    const syncHandler = new AppointmentSyncHandler(
       sheetsService,
       intakeQService,
       emailService
     );
 
-    const webhookHandler = new EnhancedWebhookHandler(
-      sheetsService,
-      appointmentSync
-    );
-
-    console.log('Processing webhook:', {
-      type: payload.Type || payload.EventType,
-      clientId: payload.ClientId,
-      appointmentId: payload.Appointment?.Id,
-      startDate: payload.Appointment?.StartDateIso,
-      duration: payload.Appointment?.Duration
-    });
-
-    // Process the webhook
-    const result = await webhookHandler.processWebhook(payload);
-    console.log('Webhook processing result:', result);
-
-    if (!result.success) {
-      throw new Error(result.error || 'Failed to process webhook');
+    // Validate webhook signature
+    if (!await intakeQService.validateWebhookSignature(
+      JSON.stringify(payload),
+      signature
+    )) {
+      return NextResponse.json(
+        { success: false, error: 'Invalid signature' },
+        { status: 401 }
+      );
     }
 
-    console.log('Webhook processed successfully');
+    // Handle the webhook event
+    // Use either EventType or Type (for backward compatibility)
+    const eventType = payload.EventType || payload.Type;
+    
+    if (!eventType) {
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: 'Missing event type',
+          timestamp: new Date().toISOString()
+        },
+        { status: 400 }
+      );
+    }
+
+    const result = await syncHandler.processAppointmentEvent(payload);
+
+    if (!result.success) {
+      return NextResponse.json({
+        success: false,
+        error: result.error,
+        details: result.details,
+        timestamp: new Date().toISOString()
+      });
+    }
+
     return NextResponse.json({
       success: true,
+      data: result.details,
       timestamp: new Date().toISOString()
     });
 
   } catch (error) {
-    console.error('Webhook error:', error);
-    return NextResponse.json({
-      success: false,
-      error: error instanceof Error ? error.message : 'Unknown error',
-      timestamp: new Date().toISOString()
-    }, { status: 500 });
+    console.error('Webhook processing error:', error);
+    
+    return NextResponse.json(
+      {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error occurred',
+        timestamp: new Date().toISOString()
+      },
+      { status: 500 }
+    );
   }
 }

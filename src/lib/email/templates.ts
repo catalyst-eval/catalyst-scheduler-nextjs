@@ -1,268 +1,136 @@
 // src/lib/email/templates.ts
 
-import type { DailyScheduleSummary } from '@/types/scheduling';
-import { toEST, getDisplayDate, formatDateRange } from '../util/date-helpers';
-
-export interface EmailTemplate {
-  subject: string;
-  html: string;
-  text: string;
-}
+import type { AppointmentRecord } from '@/types/scheduling';
+import { format } from 'date-fns';
 
 export class EmailTemplates {
-  static dailySchedule(summary: DailyScheduleSummary): EmailTemplate {
-    const displayDate = new Date(summary.date).toLocaleDateString('en-US', {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      timeZone: 'America/New_York'
+  static dailySchedule({
+    date,
+    appointments = [], // Default to empty array
+    alerts = []       // Default to empty array
+  }: {
+    date: string;
+    appointments: AppointmentRecord[];
+    alerts: Array<{ type: string; message: string; severity: 'high' | 'medium' | 'low' }>;
+  }) {
+    // Ensure we have arrays to work with
+    const safeAppointments = Array.isArray(appointments) ? appointments : [];
+    const safeAlerts = Array.isArray(alerts) ? alerts : [];
+
+    // Group appointments by clinician
+    const appointmentsByClinicianId = safeAppointments.reduce((acc, appointment) => {
+      if (!appointment?.clinicianId) return acc; // Skip invalid appointments
+      
+      const clinicianId = appointment.clinicianId;
+      if (!acc[clinicianId]) {
+        acc[clinicianId] = {
+          clinicianName: appointment.clinicianName || 'Unknown Clinician',
+          lastName: appointment.clinicianName?.split(' ').pop() || 'Unknown',
+          appointments: []
+        };
+      }
+      acc[clinicianId].appointments.push(appointment);
+      return acc;
+    }, {} as Record<string, { 
+      clinicianName: string; 
+      lastName: string;
+      appointments: AppointmentRecord[] 
+    }>);
+
+    // Sort clinicians by last name
+    const sortedClinicians = Object.values(appointmentsByClinicianId)
+      .sort((a, b) => a.lastName.localeCompare(b.lastName));
+
+    // Sort appointments for each clinician by time
+    sortedClinicians.forEach(clinicianData => {
+      clinicianData.appointments.sort((a, b) => {
+        const timeA = new Date(a.startTime).getTime();
+        const timeB = new Date(b.startTime).getTime();
+        return timeA - timeB;
+      });
     });
-    const hasHighPriorityAlerts = summary.alerts.some(a => a.severity === 'high');
+
+    // Format dates for header
+    const formattedDate = format(new Date(date), 'EEEE, MMMM d, yyyy');
+
+    // Build HTML content
+    const html = `
+      <div style="font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto;">
+        <h1 style="color: #333; margin-bottom: 5px;">Today's Schedule & Office Assignments</h1>
+        <h2 style="color: #666; font-size: 1.2em; margin-top: 0;">${formattedDate}</h2>
+        
+        ${safeAlerts.length > 0 ? `
+          <div style="margin: 20px 0;">
+            <h2 style="color: #333;">Alerts</h2>
+            ${safeAlerts.map(alert => `
+              <div style="
+                padding: 10px; 
+                margin: 5px 0; 
+                background-color: ${alert.severity === 'high' ? '#ffe6e6' : 
+                                  alert.severity === 'medium' ? '#fff3e6' : 
+                                  '#e6ffe6'};
+                border-radius: 4px;"
+              >
+                <strong>${alert.type}:</strong> ${alert.message}
+              </div>
+            `).join('')}
+          </div>
+        ` : ''}
+
+        ${sortedClinicians.map(({ clinicianName, appointments }) => `
+          <div style="margin: 30px 0;">
+            <h2 style="color: #333; border-bottom: 2px solid #eee; padding-bottom: 5px;">
+              ${clinicianName}
+            </h2>
+            <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
+              <thead>
+                <tr style="background-color: #f5f5f5;">
+                  <th style="padding: 8px; text-align: left; border: 1px solid #ddd;">Time</th>
+                  <th style="padding: 8px; text-align: left; border: 1px solid #ddd;">Client</th>
+                  <th style="padding: 8px; text-align: left; border: 1px solid #ddd;">Type</th>
+                  <th style="padding: 8px; text-align: left; border: 1px solid #ddd;">Office</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${appointments.map(appt => `
+                  <tr>
+                    <td style="padding: 8px; border: 1px solid #ddd;">
+                      ${format(new Date(appt.startTime), 'h:mm a')} - ${format(new Date(appt.endTime), 'h:mm a')}
+                    </td>
+                    <td style="padding: 8px; border: 1px solid #ddd;">${appt.clientName || 'Unknown Client'}</td>
+                    <td style="padding: 8px; border: 1px solid #ddd;">${appt.sessionType || 'Unknown Type'}</td>
+                    <td style="padding: 8px; border: 1px solid #ddd;">${appt.officeId}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        `).join('')}
+        
+        <div style="color: #666; font-size: 12px; margin-top: 30px; border-top: 1px solid #eee; padding-top: 10px;">
+          Generated ${format(new Date(), 'M/d/yyyy, h:mm:ss a')}
+        </div>
+      </div>
+    `;
+
+    // Plain text version
+    const text = `Today's Schedule & Office Assignments\n${formattedDate}\n\n` +
+      (safeAlerts.length > 0 ? `Alerts:\n${safeAlerts.map(alert => 
+        `${alert.type}: ${alert.message}`).join('\n')}\n\n` : '') +
+      sortedClinicians.map(({ clinicianName, appointments }) => 
+        `${clinicianName}\n${'-'.repeat(clinicianName.length)}\n` +
+        appointments.map(appt => 
+          `${format(new Date(appt.startTime), 'h:mm a')} - ${format(new Date(appt.endTime), 'h:mm a')}: ` +
+          `${appt.clientName || 'Unknown Client'} (${appt.sessionType || 'Unknown Type'}) - ` +
+          `Office: ${appt.officeId}`
+        ).join('\n')
+      ).join('\n\n') +
+      `\n\nGenerated ${format(new Date(), 'M/d/yyyy, h:mm:ss a')}`;
 
     return {
-      subject: this.formatSubject(displayDate, summary),
-      html: this.formatHtml(displayDate, summary),
-      text: this.formatText(displayDate, summary)
+      subject: `Today's Schedule & Office Assignments - ${formattedDate}`,
+      html,
+      text
     };
-  }
-
-  private static formatSubject(displayDate: string, summary: DailyScheduleSummary): string {
-    const hasHighPriorityAlerts = summary.alerts.some(a => a.severity === 'high');
-    const hasConflicts = summary.conflicts.length > 0;
-
-    let subject = `Daily Schedule - ${displayDate}`;
-    if (hasHighPriorityAlerts) {
-      subject = `⚠️ ${subject} - HIGH PRIORITY ALERTS`;
-    } else if (hasConflicts) {
-      subject = `⚠️ ${subject} - Conflicts Detected`;
-    }
-    return subject;
-  }
-
-  private static formatHtml(displayDate: string, summary: DailyScheduleSummary): string {
-    return `
-      <div style="font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; line-height: 1.5;">
-        <h1 style="color: #1e40af; margin-bottom: 1.5em;">Daily Schedule - ${displayDate}</h1>
-        
-        ${this.formatAlertsHtml(summary.alerts)}
-        ${this.formatConflictsHtml(summary.conflicts)}
-        
-        <div style="margin: 2em 0;">
-          <h2 style="color: #1e40af; margin-bottom: 1em;">Appointments</h2>
-          ${summary.appointments.length === 0 ? 
-            `<p style="color: #666;">No appointments scheduled for ${displayDate}.</p>` :
-            this.formatAppointmentsTable(summary.appointments)
-          }
-        </div>
-
-        <div style="margin: 2em 0;">
-          <h2 style="color: #1e40af; margin-bottom: 1em;">Office Utilization</h2>
-          ${this.formatOfficeUtilization(summary.officeUtilization)}
-        </div>
-
-        <div style="color: #6b7280; font-size: 12px; margin-top: 3em; border-top: 1px solid #e5e7eb; padding-top: 1em;">
-          Generated ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York' })}
-        </div>
-      </div>
-    `;
-  }
-
-  private static formatText(displayDate: string, summary: DailyScheduleSummary): string {
-    const lines: string[] = [
-      `Daily Schedule - ${displayDate}`,
-      '',
-    ];
-
-    // Add alerts
-    if (summary.alerts.length > 0) {
-      lines.push('ALERTS:');
-      summary.alerts.forEach(alert => {
-        lines.push(`[${alert.severity.toUpperCase()}] ${alert.type}: ${alert.message}`);
-      });
-      lines.push('');
-    }
-
-    // Add conflicts
-    if (summary.conflicts.length > 0) {
-      lines.push('CONFLICTS:');
-      summary.conflicts.forEach(conflict => {
-        lines.push(`[${conflict.severity.toUpperCase()}] ${conflict.type}: ${conflict.description}`);
-      });
-      lines.push('');
-    }
-
-    // Add appointments
-    lines.push('APPOINTMENTS:');
-    if (summary.appointments.length === 0) {
-      lines.push('No appointments scheduled for this day.');
-    } else {
-      summary.appointments
-        .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())
-        .forEach(appt => {
-          lines.push(
-            `${formatDateRange(appt.startTime, appt.endTime)} - ` +
-            `${appt.clientName} with ${appt.clinicianName} ` +
-            `(${appt.sessionType}${appt.officeId ? ` in ${appt.officeId}` : ''})`
-          );
-        });
-    }
-    lines.push('');
-
-    // Add office utilization
-    lines.push('OFFICE UTILIZATION:');
-    Array.from(summary.officeUtilization.entries()).forEach(([officeId, data]) => {
-      const utilization = Math.round((data.bookedSlots / data.totalSlots) * 100);
-      lines.push(
-        `${officeId}: ${utilization}% ` +
-        `${data.specialNotes?.length ? `(${data.specialNotes.join(', ')})` : ''}`
-      );
-    });
-
-    lines.push('');
-    lines.push(`Generated ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York' })}`);
-
-    return lines.join('\n');
-  }
-
-  private static formatAppointmentsTable(appointments: DailyScheduleSummary['appointments'], displayDate?: string): string {
-    return `
-      <table style="width: 100%; border-collapse: collapse; margin-bottom: 2em;">
-        <thead>
-          <tr style="background-color: #dbeafe;">
-            <th style="padding: 12px; text-align: left; border: 1px solid #bfdbfe; font-weight: 600;">Time</th>
-            <th style="padding: 12px; text-align: left; border: 1px solid #bfdbfe; font-weight: 600;">Client</th>
-            <th style="padding: 12px; text-align: left; border: 1px solid #bfdbfe; font-weight: 600;">Clinician</th>
-            <th style="padding: 12px; text-align: left; border: 1px solid #bfdbfe; font-weight: 600;">Type</th>
-            <th style="padding: 12px; text-align: left; border: 1px solid #bfdbfe; font-weight: 600;">Office</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${appointments
-            .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())
-            .map((appt, index) => `
-              <tr style="background-color: ${index % 2 === 0 ? '#f8fafc' : 'white'}">
-                <td style="padding: 12px; border: 1px solid #bfdbfe;">
-                  ${formatDateRange(appt.startTime, appt.endTime)}
-                </td>
-                <td style="padding: 12px; border: 1px solid #bfdbfe;">
-                  ${appt.clientName || `Client ${appt.clientId}`}
-                </td>
-                <td style="padding: 12px; border: 1px solid #bfdbfe;">
-                  ${appt.clinicianName || `Clinician ${appt.clinicianId}`}
-                </td>
-                <td style="padding: 12px; border: 1px solid #bfdbfe;">
-                  ${this.formatSessionType(appt.sessionType)}
-                </td>
-                <td style="padding: 12px; border: 1px solid #bfdbfe;">
-                  ${appt.officeId || 'TBD'}
-                </td>
-              </tr>
-            `).join('')}
-        </tbody>
-      </table>
-    `;
-  }
-
-  private static formatSessionType(type: string): string {
-    const types: Record<string, string> = {
-      'in-person': 'In-Person',
-      'telehealth': 'Telehealth',
-      'group': 'Group',
-      'family': 'Family'
-    };
-    return types[type] || type;
-  }
-
-  private static getAlertBackground(severity: 'high' | 'medium' | 'low'): string {
-    switch (severity) {
-      case 'high':
-        return '#fee2e2';  // Light red
-      case 'medium':
-        return '#fef3c7';  // Light yellow
-      case 'low':
-        return '#d1fae5';  // Light green
-      default:
-        return '#f3f4f6';  // Light gray
-    }
-  }
-
-  private static getAlertColor(severity: 'high' | 'medium' | 'low'): string {
-    switch (severity) {
-      case 'high':
-        return '#dc2626';  // Red
-      case 'medium':
-        return '#d97706';  // Yellow
-      case 'low':
-        return '#059669';  // Green
-      default:
-        return '#374151';  // Gray
-    }
-  }
-
-  private static formatAlertsHtml(alerts: DailyScheduleSummary['alerts']): string {
-    if (!alerts.length) return '';
-    
-    return `
-      <div style="margin: 1.5em 0;">
-        <h2 style="color: #1e40af; margin-bottom: 1em;">Alerts</h2>
-        ${alerts.map(alert => `
-          <div style="padding: 12px; margin: 8px 0; border-radius: 4px; 
-               background-color: ${this.getAlertBackground(alert.severity)};">
-            <strong style="color: ${this.getAlertColor(alert.severity)};">
-              ${alert.type.toUpperCase()}:
-            </strong> 
-            ${alert.message}
-          </div>
-        `).join('')}
-      </div>
-    `;
-  }
-
-  private static formatConflictsHtml(conflicts: DailyScheduleSummary['conflicts']): string {
-    if (!conflicts.length) return '';
-    
-    return `
-      <div style="margin: 1.5em 0;">
-        <h2 style="color: #1e40af; margin-bottom: 1em;">Conflicts</h2>
-        ${conflicts.map(conflict => `
-          <div style="padding: 12px; margin: 8px 0; border-radius: 4px; 
-               background-color: ${this.getAlertBackground(conflict.severity)};">
-            <strong style="color: ${this.getAlertColor(conflict.severity)};">
-              ${conflict.type.toUpperCase()}
-            </strong>
-            <div>${conflict.description}</div>
-            ${conflict.officeId ? `<div>Office: ${conflict.officeId}</div>` : ''}
-          </div>
-        `).join('')}
-      </div>
-    `;
-  }
-
-  private static formatOfficeUtilization(utilization: DailyScheduleSummary['officeUtilization']): string {
-    return `
-      <table style="width: 100%; border-collapse: collapse;">
-        <thead>
-          <tr style="background-color: #dbeafe;">
-            <th style="padding: 12px; text-align: left; border: 1px solid #bfdbfe; font-weight: 600;">Office</th>
-            <th style="padding: 12px; text-align: left; border: 1px solid #bfdbfe; font-weight: 600;">Usage</th>
-            <th style="padding: 12px; text-align: left; border: 1px solid #bfdbfe; font-weight: 600;">Notes</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${Array.from(utilization.entries()).map(([officeId, data], index) => `
-            <tr style="background-color: ${index % 2 === 0 ? '#f8fafc' : 'white'}">
-              <td style="padding: 12px; border: 1px solid #bfdbfe;">${officeId}</td>
-              <td style="padding: 12px; border: 1px solid #bfdbfe;">
-                ${Math.round((data.bookedSlots / data.totalSlots) * 100)}%
-              </td>
-              <td style="padding: 12px; border: 1px solid #bfdbfe;">
-                ${data.specialNotes?.join(', ') || ''}
-              </td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
-    `;
   }
 }
