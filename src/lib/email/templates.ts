@@ -3,7 +3,7 @@
 import type { AppointmentRecord, StandardOfficeId } from '@/types/scheduling';
 import { format } from 'date-fns';
 
-interface EmailTemplate {
+export interface EmailTemplate {
   subject: string;
   html: string;
   text: string;

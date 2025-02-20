@@ -1,6 +1,8 @@
+'use client';
+
 import React, { useState, useEffect } from 'react';
 import type { AppointmentRecord } from '@/types/scheduling';
-import type { SheetOffice } from '@/types/sheets';
+import type { SheetOffice } from '@/types/sheets'
 
 interface ScheduleViewProps {
   appointments: AppointmentRecord[];
