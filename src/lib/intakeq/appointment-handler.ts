@@ -2,6 +2,7 @@ import type { IntakeQWebhookPayload, IntakeQAppointment } from '@/types/webhooks
 import { GoogleSheetsService, AuditEventType } from '@/lib/google/sheets';
 import { OfficeAssignmentService } from '@/lib/scheduling/office-assignment';
 import type { AppointmentRecord } from '@/types/scheduling';
+import type { StandardOfficeId } from '@/types/offices';
 
 export class AppointmentHandler {
   constructor(
@@ -287,7 +288,7 @@ private async handleNewAppointment(appointment: IntakeQAppointment, clientId: st
         clientName: appointment.ClientName,  // Add this
         clinicianId: appointment.PractitionerId,
         clinicianName: appointment.PractitionerName,  // Add this
-        officeId: '', // Keep existing office
+        officeId: 'B-1' as StandardOfficeId, // Default office ID that will be updated later
         sessionType: this.determineSessionType(appointment.ServiceName),
         startTime: appointment.StartDateIso,
         endTime: appointment.EndDateIso,

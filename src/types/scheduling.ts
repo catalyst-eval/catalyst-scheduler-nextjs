@@ -1,11 +1,11 @@
 // src/types/scheduling.ts
+import type { StandardOfficeId } from './offices';
+
+export type { StandardOfficeId };  // Re-export for backward compatibility
 
 export type SessionType = 'in-person' | 'telehealth' | 'group' | 'family';
 export type AppointmentSource = 'intakeq' | 'manual';
 export type AlertSeverity = 'high' | 'medium' | 'low';
-
-// Standard office ID format (e.g., 'B-a', 'A-c')
-export type StandardOfficeId = `${Uppercase<string>}-${Lowercase<string>}`;
 
 export interface AppointmentRecord {
   appointmentId: string;
@@ -14,7 +14,7 @@ export interface AppointmentRecord {
   clinicianId: string;
   clinicianName: string;
   officeId: StandardOfficeId;
-  suggestedOfficeId?: string;
+  suggestedOfficeId?: StandardOfficeId;
   sessionType: SessionType;
   startTime: string;
   endTime: string;
@@ -87,16 +87,4 @@ export interface SchedulingConflict {
     reason: string;
     newOfficeId?: StandardOfficeId;
   };
-}
-
-export interface TimeSlotRequest {
-  officeId: StandardOfficeId;
-  dateTime: string;
-  duration: number;
-}
-
-export interface ValidationResult {
-  isValid: boolean;
-  conflicts?: string[];
-  error?: string;
 }
