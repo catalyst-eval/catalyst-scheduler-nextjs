@@ -4,8 +4,10 @@ import type { IntakeQAppointment } from '@/types/webhooks';
 import type { 
   AppointmentRecord, 
   SessionType, 
-  AlertSeverity 
+  AlertSeverity,
+  StandardOfficeId 
 } from '@/types/scheduling';
+import { standardizeOfficeId } from '@/lib/util/office-id';
 
 export const SESSION_TYPES = ['in-person', 'telehealth', 'group', 'family'] as const;
 export const ALERT_SEVERITIES = ['high', 'medium', 'low'] as const;
@@ -69,8 +71,10 @@ export function transformIntakeQAppointment(appt: IntakeQAppointment): Appointme
   return {
     appointmentId: appt.Id,
     clientId: appt.ClientId.toString(),
+    clientName: appt.ClientName || appt.ClientId.toString(), // Added clientName
     clinicianId: appt.PractitionerId,
-    officeId: '', // Default empty until assigned
+    clinicianName: appt.PractitionerName || appt.PractitionerId, // Added clinicianName
+    officeId: standardizeOfficeId('A-a'),
     sessionType: determineSessionType(appt.ServiceName),
     requirements: {
       accessibility: false,

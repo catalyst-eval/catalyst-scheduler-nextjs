@@ -1,7 +1,9 @@
 // src/lib/intakeq/service.ts
 
 import type { IntakeQAppointment } from '@/types/webhooks';
+import type { StandardOfficeId } from '@/types/scheduling';
 import { GoogleSheetsService, AuditEventType } from '@/lib/google/sheets';
+import { standardizeOfficeId } from '@/lib/util/office-id';
 import crypto from 'crypto';
 
 export class IntakeQService {
@@ -201,5 +203,38 @@ export class IntakeQService {
       console.error('IntakeQ connection test failed:', error instanceof Error ? error.message : 'Unknown error');
       return false;
     }
+  }
+
+  /**
+   * Helper method to extract and standardize office ID from IntakeQ appointment
+   */
+  private async getStandardizedOfficeId(appointment: IntakeQAppointment): Promise<StandardOfficeId> {
+    try {
+      // If appointment already has an office assignment from our system, use that
+      if (appointment.Location) {
+        return standardizeOfficeId(appointment.Location);
+      }
+
+      // Get clinician's default office
+      const clinicians = await this.sheetsService.getClinicians();
+      const clinician = clinicians.find(c => c.intakeQPractitionerId === appointment.PractitionerId);
+
+      if (clinician?.preferredOffices?.length) {
+        return standardizeOfficeId(clinician.preferredOffices[0]);
+      }
+
+      // Default to A-a if no other assignment possible
+      return 'A-a' as StandardOfficeId;
+    } catch (error) {
+      console.error('Error standardizing office ID:', error);
+      return 'A-a' as StandardOfficeId;
+    }
+  }
+
+  /**
+   * Validate if an office ID is properly formatted
+   */
+  private isValidOfficeId(officeId: string): boolean {
+    return /^[A-Z]-[a-z]$/.test(officeId);
   }
 }

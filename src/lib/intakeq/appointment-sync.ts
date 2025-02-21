@@ -30,6 +30,7 @@ import {
   determineSessionType,
   EmailPriority
 } from '../transformations/appointment-types';
+import { standardizeOfficeId } from '@/lib/util/office-id';
 
 export class AppointmentSyncHandler {
   private readonly recipientService: RecipientManagementService;
@@ -406,14 +407,6 @@ private async sendNotifications(options: {
 
   // Transform the appointment
   const transformedAppointment = transformIntakeQAppointment(appointment);
-
-  // Create appropriate template
-  const standardizeOfficeId = (id?: string): StandardOfficeId => {
-    if (!id) return 'A-a' as StandardOfficeId;
-    const match = id.match(/^([A-Z])-([a-z])$/);
-    if (match) return id as StandardOfficeId;
-    return 'A-a' as StandardOfficeId;
-  };
   
   const template = EmailTemplates.dailySchedule({
     date: new Date(appointment.StartDateIso).toISOString().split('T')[0],
@@ -508,11 +501,9 @@ private async sendNotifications(options: {
       const sensoryPrefs = clientPrefs?.sensoryPreferences || [];
       const physicalNeeds = clientPrefs?.physicalNeeds || [];
 
-      const standardizeOfficeId = (officeId?: string): StandardOfficeId | undefined => {
+      const standardizePreferredOffice = (officeId?: string): StandardOfficeId | undefined => {
         if (!officeId) return undefined;
-        const match = officeId.match(/^([A-Z])-([a-z])$/);
-        if (match) return officeId as StandardOfficeId;
-        return undefined;
+        return standardizeOfficeId(officeId);
       };
       
       const requirements = {
@@ -521,7 +512,7 @@ private async sendNotifications(options: {
           ...(Array.isArray(sensoryPrefs) ? sensoryPrefs : []),
           ...(Array.isArray(physicalNeeds) ? physicalNeeds : [])
         ],
-        roomPreference: standardizeOfficeId(clientPrefs?.assignedOffice)
+        roomPreference: standardizePreferredOffice(clientPrefs?.assignedOffice)  // Updated this line
       };
 
       return {

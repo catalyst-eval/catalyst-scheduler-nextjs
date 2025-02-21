@@ -6,6 +6,7 @@ import type {
   SchedulingConflict,
   StandardOfficeId
 } from '@/types/scheduling';
+import { standardizeOfficeId } from '../util/office-id';
 import type { 
   SheetOffice, 
   SheetClinician, 
@@ -92,66 +93,64 @@ const endOfDay = range.end;
       );
 
       // Process appointments
-      console.log('Processing IntakeQ appointments...');
-      const processedIntakeQAppointments = await Promise.all(intakeQAppointments.map(async intakeQAppt => {
-        // Get local appointment if exists
-        const localAppt = localAppointments.find(appt => appt.appointmentId === intakeQAppt.Id);
-        const clinician = clinicianMap.get(intakeQAppt.PractitionerId);
+console.log('Processing IntakeQ appointments...');
+const processedIntakeQAppointments = await Promise.all(intakeQAppointments.map(async intakeQAppt => {
+  // Get local appointment if exists
+  const localAppt = localAppointments.find(appt => appt.appointmentId === intakeQAppt.Id);
+  const clinician = clinicianMap.get(intakeQAppt.PractitionerId);
 
-        // Get suggested office from local appointment or calculate new one
-        let suggestedOfficeId = localAppt?.suggestedOfficeId;
-        let officeId = localAppt?.officeId;
-        let notes = localAppt?.notes;
+  // Get suggested office from local appointment or calculate new one
+  let suggestedOfficeId = localAppt?.suggestedOfficeId;
+  let officeId = localAppt?.officeId;
+  let notes = localAppt?.notes;
 
-        if (!suggestedOfficeId && clinician) {
-          const assignmentService = new OfficeAssignmentService(
-            offices,
-            await this.sheetsService.getAssignmentRules(),
-            clinicians
-          );
+  if (!suggestedOfficeId && clinician) {
+    const assignmentService = new OfficeAssignmentService(
+      offices,
+      await this.sheetsService.getAssignmentRules(),
+      clinicians
+    );
 
-          const result = await assignmentService.findOptimalOffice({
-            clientId: intakeQAppt.ClientId.toString(),
-            clinicianId: clinician.clinicianId,
-            dateTime: intakeQAppt.StartDateIso,
-            duration: this.calculateDuration(intakeQAppt.StartDateIso, intakeQAppt.EndDateIso),
-            sessionType: this.determineSessionType(intakeQAppt.ServiceName)
-          });
+    const result = await assignmentService.findOptimalOffice({
+      clientId: intakeQAppt.ClientId.toString(),
+      clinicianId: clinician.clinicianId,
+      dateTime: intakeQAppt.StartDateIso,
+      duration: this.calculateDuration(intakeQAppt.StartDateIso, intakeQAppt.EndDateIso),
+      sessionType: this.determineSessionType(intakeQAppt.ServiceName)
+    });
 
-          if (result.success) {
-            suggestedOfficeId = result.officeId;
-            officeId = result.officeId;
-            notes = result.notes;
-          }
-        }
-
-        const standardizeOfficeId = (id: string): StandardOfficeId => {
-          const match = id.match(/^([A-Z])-([a-z])$/);
-          if (match) return id as StandardOfficeId;
-          return 'A-a' as StandardOfficeId; // Default office if format doesn't match
-        };
-        
-        return {
-          appointmentId: intakeQAppt.Id,
-          clientId: intakeQAppt.ClientId.toString(),
-          clientName: intakeQAppt.ClientName,
-          clinicianId: clinicianMap.get(intakeQAppt.PractitionerId)?.clinicianId || intakeQAppt.PractitionerId,
-          clinicianName: clinicianMap.get(intakeQAppt.PractitionerId)?.name || 'Unknown',
-          officeId: standardizeOfficeId(officeId || 'A-a'),
-          suggestedOfficeId: officeId,
-          sessionType: this.determineSessionType(intakeQAppt.ServiceName),
-          startTime: intakeQAppt.StartDateIso,
-          endTime: intakeQAppt.EndDateIso,
-          status: localAppt?.status || 'scheduled',
-          lastUpdated: new Date().toISOString(),
-          source: localAppt?.source || 'intakeq' as 'intakeq' | 'manual',
-          requirements: localAppt?.requirements || {
-            accessibility: false,
-            specialFeatures: []
-          },
-          notes
-        };
-      }));
+    if (result.success) {
+      suggestedOfficeId = result.officeId;
+      officeId = result.officeId;
+      notes = result.notes;
+    }
+  }
+  
+  // Use imported standardizeOfficeId utility
+  const standardizedOfficeId = standardizeOfficeId(officeId || 'A-a');
+  const standardizedSuggestedId = standardizeOfficeId(suggestedOfficeId);
+  
+  return {
+    appointmentId: intakeQAppt.Id,
+    clientId: intakeQAppt.ClientId.toString(),
+    clientName: intakeQAppt.ClientName,
+    clinicianId: clinicianMap.get(intakeQAppt.PractitionerId)?.clinicianId || intakeQAppt.PractitionerId,
+    clinicianName: clinicianMap.get(intakeQAppt.PractitionerId)?.name || 'Unknown',
+    officeId: standardizedOfficeId,
+    suggestedOfficeId: standardizedSuggestedId,
+    sessionType: this.determineSessionType(intakeQAppt.ServiceName),
+    startTime: intakeQAppt.StartDateIso,
+    endTime: intakeQAppt.EndDateIso,
+    status: localAppt?.status || 'scheduled',
+    lastUpdated: new Date().toISOString(),
+    source: localAppt?.source || 'intakeq' as 'intakeq' | 'manual',
+    requirements: localAppt?.requirements || {
+      accessibility: false,
+      specialFeatures: []
+    },
+    notes
+  };
+}));
 
       // Sort appointments by time
       // Process local appointments that aren't from IntakeQ
@@ -333,13 +332,14 @@ const endOfDay = range.end;
     offices: SheetOffice[]
   ): void {
     offices.forEach(office => {
+      const standardizedOfficeId = standardizeOfficeId(office.officeId);
       const officeAppointments = summary.appointments.filter(
-        appt => appt.officeId === office.officeId
+        appt => standardizeOfficeId(appt.officeId) === standardizedOfficeId
       );
-
+  
       const totalSlots = 8; // 8-hour day
       const bookedSlots = officeAppointments.length;
-
+  
       const notes: string[] = [];
       if (office.isFlexSpace) {
         notes.push('Flex space - coordinate with team');
@@ -349,8 +349,8 @@ const endOfDay = range.end;
       } else if (bookedSlots / totalSlots > 0.8) {
         notes.push('High utilization');
       }
-
-      summary.officeUtilization.set(this.standardizeOfficeId(office.officeId), {
+  
+      summary.officeUtilization.set(standardizedOfficeId, {
         totalSlots,
         bookedSlots,
         specialNotes: notes

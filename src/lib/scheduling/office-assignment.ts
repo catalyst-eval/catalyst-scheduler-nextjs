@@ -12,6 +12,8 @@ import type {
   StandardOfficeId
 } from '@/types/scheduling';
 
+import { standardizeOfficeId } from '../util/office-id';
+
 interface RuleEvaluationResult {
   score: number;
   reason: string;
@@ -38,31 +40,6 @@ export class OfficeAssignmentService {
     private readonly existingBookings: Map<string, SchedulingRequest[]> = new Map()
   ) {}
 
-  /**
-   * Standardize office ID format
-   */
-  private standardizeOfficeId(officeId: string): StandardOfficeId {
-    // Remove any whitespace
-    const cleanId = officeId.trim();
-
-    // If it already matches pattern, return as is
-    if (this.OFFICE_ID_PATTERN.test(cleanId)) {
-      return cleanId as StandardOfficeId;
-    }
-
-    // Try to extract floor and unit
-    const floor = cleanId.charAt(0).toUpperCase();
-    const unit = cleanId.slice(-1).toLowerCase();
-
-    // If we can construct a valid ID, return it
-    if (/[A-Z]/.test(floor) && /[a-z]/.test(unit)) {
-      return `${floor}-${unit}` as StandardOfficeId;
-    }
-
-    // Return default if we can't standardize
-    return this.DEFAULT_OFFICE_ID;
-  }
-
   async findOptimalOffice(request: SchedulingRequest): Promise<SchedulingResult> {
     const log: string[] = [`Starting office assignment for request: ${JSON.stringify(request)}`];
     
@@ -81,7 +58,7 @@ export class OfficeAssignmentService {
       if (validOffices.length === 0) {
         // If no valid offices found, attempt to use default office
         const defaultOffice = this.offices.find(o => 
-          this.standardizeOfficeId(o.officeId) === this.DEFAULT_OFFICE_ID
+          standardizeOfficeId(o.officeId) === this.DEFAULT_OFFICE_ID
         );
 
         if (defaultOffice && defaultOffice.inService) {
@@ -128,7 +105,7 @@ export class OfficeAssignmentService {
       }
 
       const bestMatch = candidates[0];
-      const standardizedOfficeId = this.standardizeOfficeId(bestMatch.office.officeId);
+      const standardizedOfficeId = standardizeOfficeId(bestMatch.office.officeId);
       log.push(`Selected office ${standardizedOfficeId} with score ${bestMatch.score}`);
       log.push(`Assignment reasons: ${bestMatch.reasons.join(', ')}`);
 
@@ -155,48 +132,80 @@ export class OfficeAssignmentService {
     clinician: SheetClinician
   ): SheetOffice[] {
     const log: string[] = [];
+    const validOffices: SheetOffice[] = [];
     
-    return this.offices.filter(office => {
-      // Check if office is in service
-      if (!office.inService) {
-        log.push(`Office ${office.officeId} filtered: not in service`);
-        return false;
-      }
+    try {
+      for (const office of this.offices) {
+        const officeId = standardizeOfficeId(office.officeId);
+        let isValid = true;
+        
+        // Check if office is in service
+        if (!office.inService) {
+          log.push(`Office ${officeId} filtered: not in service`);
+          isValid = false;
+          continue;
+        }
 
-      // Check accessibility requirements
-      if (request.requirements?.accessibility && !office.isAccessible) {
-        log.push(`Office ${office.officeId} filtered: accessibility requirements not met`);
-        return false;
-      }
+        // Check accessibility requirements
+        if (request.requirements?.accessibility && !office.isAccessible) {
+          log.push(`Office ${officeId} filtered: accessibility requirements not met`);
+          isValid = false;
+          continue;
+        }
 
-      // Check clinician preferences - BUT don't exclude if they're the primary clinician
-      if (office.primaryClinician !== clinician.clinicianId && 
-          clinician.preferredOffices.length > 0 && 
-          !clinician.preferredOffices.includes(office.officeId)) {
-        log.push(`Office ${office.officeId} filtered: not in clinician's preferred offices`);
-        return false;
-      }
+        // Check clinician preferences - BUT don't exclude if they're the primary clinician
+        const isPrimaryClinician = office.primaryClinician === clinician.clinicianId;
+        const hasPreferredOffices = clinician.preferredOffices.length > 0;
+        const isPreferredOffice = clinician.preferredOffices.includes(office.officeId);
 
-      // Check special features
-      if (request.requirements?.specialFeatures?.length) {
-        const hasAllFeatures = request.requirements.specialFeatures.every(
-          feature => office.specialFeatures.includes(feature)
-        );
-        if (!hasAllFeatures) {
-          log.push(`Office ${office.officeId} filtered: missing required features`);
-          return false;
+        if (!isPrimaryClinician && hasPreferredOffices && !isPreferredOffice) {
+          log.push(`Office ${officeId} filtered: not in clinician's preferred offices`);
+          isValid = false;
+          continue;
+        }
+
+        // Check special features
+        if (request.requirements?.specialFeatures?.length) {
+          const hasAllFeatures = request.requirements.specialFeatures.every(
+            feature => office.specialFeatures.includes(feature)
+          );
+          if (!hasAllFeatures) {
+            log.push(`Office ${officeId} filtered: missing required features`);
+            isValid = false;
+            continue;
+          }
+        }
+
+        // Check session type requirements
+        if (request.sessionType === 'group' && !office.specialFeatures.includes('group')) {
+          log.push(`Office ${officeId} filtered: not suitable for group sessions`);
+          isValid = false;
+          continue;
+        }
+
+        // Check room preference if specified
+        if (request.requirements?.roomPreference) {
+          const preferredId = standardizeOfficeId(request.requirements.roomPreference);
+          if (officeId !== preferredId) {
+            log.push(`Office ${officeId} filtered: not preferred room ${preferredId}`);
+            isValid = false;
+            continue;
+          }
+        }
+
+        if (isValid) {
+          validOffices.push(office);
+          log.push(`Office ${officeId} passed all validation checks`);
         }
       }
 
-      // Check session type requirements
-      if (request.sessionType === 'group' && 
-          !office.specialFeatures.includes('group')) {
-        log.push(`Office ${office.officeId} filtered: not suitable for group sessions`);
-        return false;
-      }
+      return validOffices;
 
-      return true;
-    });
+    } catch (error) {
+      console.error('Error filtering valid offices:', error);
+      log.push(`Error during office filtering: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      return [];
+    }
   }
 
   private async scoreOffice(
@@ -204,81 +213,102 @@ export class OfficeAssignmentService {
     request: SchedulingRequest,
     clinician: SheetClinician
   ): Promise<OfficeScore> {
-    const score: OfficeScore = {
-      office,
-      score: 0,
-      reasons: [],
-      conflicts: [],
-      log: [`Starting evaluation for office ${office.officeId}`]
-    };
+    try {
+      const officeId = standardizeOfficeId(office.officeId);
+      const score: OfficeScore = {
+        office,
+        score: 0,
+        reasons: [],
+        conflicts: [],
+        log: [`Starting evaluation for office ${officeId}`]
+      };
 
-    // 1. Check existing bookings and conflicts
-    const existingBookings = this.existingBookings.get(office.officeId) || [];
-    const timeConflicts = this.checkTimeConflicts(request, existingBookings);
-    
-    if (timeConflicts.length > 0) {
-      score.log.push(`Found ${timeConflicts.length} time conflicts`);
-      score.conflicts = timeConflicts;
+      // 1. Check existing bookings and conflicts
+      const existingBookings = this.existingBookings.get(officeId) || [];
+      const timeConflicts = await this.checkTimeConflicts(request, existingBookings);
+      
+      if (timeConflicts.length > 0) {
+        score.log.push(`Found ${timeConflicts.length} time conflicts`);
+        score.conflicts = timeConflicts;
+        return score;
+      }
+
+      // 2. Apply base scoring
+      try {
+        // Primary clinician office gets highest base score
+        if (office.primaryClinician === clinician.clinicianId) {
+          score.score += 1000;
+          score.reasons.push('HARD: Primary clinician office');
+          score.log.push('Added 1000 points: Primary clinician office');
+        }
+        
+        // Alternative clinicians get good but lower score
+        else if (office.alternativeClinicians?.includes(clinician.clinicianId)) {
+          score.score += 500;
+          score.reasons.push('Alternative clinician office');
+          score.log.push('Added 500 points: Alternative clinician office');
+        }
+        
+        // Preferred office bonus
+        const standardizedPreferredOffices = clinician.preferredOffices.map(id => 
+          standardizeOfficeId(id)
+        );
+        if (standardizedPreferredOffices.includes(officeId)) {
+          score.score += 200;
+          score.reasons.push('Clinician preferred office');
+          score.log.push('Added 200 points: Clinician preferred office');
+        }
+
+        // 3. Apply rules in priority order
+        const sortedRules = [...this.rules]
+          .filter(rule => rule.active)
+          .sort((a, b) => b.priority - a.priority); // Changed to sort highest first
+
+        for (const rule of sortedRules) {
+          const ruleScore = this.evaluateRule(rule, office, request, clinician);
+          score.score += ruleScore.score;
+          if (ruleScore.score > 0) {
+            score.reasons.push(ruleScore.reason);
+            score.log.push(...ruleScore.log);
+          }
+        }
+
+        // 4. Apply client preferences if available
+        if (this.clientPreference) {
+          const prefScore = this.evaluateClientPreferences(office);
+          score.score += prefScore.score;
+          if (prefScore.score > 0) {
+            score.reasons.push(...prefScore.reasons);
+            score.log.push(...prefScore.log);
+          }
+        }
+
+        // 5. Apply session type specific scoring
+        const sessionScore = this.evaluateSessionType(office, request.sessionType);
+        score.score += sessionScore.score;
+        if (sessionScore.score > 0) {
+          score.reasons.push(sessionScore.reason);
+          score.log.push(...sessionScore.log);
+        }
+
+      } catch (error) {
+        score.log.push(`Error during scoring calculations: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        console.error('Error calculating office score:', error);
+      }
+
+      score.log.push(`Final score for ${officeId}: ${score.score}`);
       return score;
-    }
 
-    // 2. Apply base scoring
-    
-    // Primary clinician office gets highest base score
-    if (office.primaryClinician === clinician.clinicianId) {
-      score.score += 1000;
-      score.reasons.push('HARD: Primary clinician office');
-      score.log.push('Added 1000 points: Primary clinician office');
+    } catch (error) {
+      console.error('Error in scoreOffice:', error);
+      return {
+        office,
+        score: 0,
+        reasons: ['Error during scoring'],
+        conflicts: [],
+        log: [`Error scoring office: ${error instanceof Error ? error.message : 'Unknown error'}`]
+      };
     }
-    
-    // Alternative clinicians get good but lower score
-    else if (office.alternativeClinicians?.includes(clinician.clinicianId)) {
-      score.score += 500;
-      score.reasons.push('Alternative clinician office');
-      score.log.push('Added 500 points: Alternative clinician office');
-    }
-    
-    // Preferred office bonus
-    if (clinician.preferredOffices.includes(office.officeId)) {
-      score.score += 200;
-      score.reasons.push('Clinician preferred office');
-      score.log.push('Added 200 points: Clinician preferred office');
-    }
-
-    // 3. Apply rules in priority order
-    const sortedRules = [...this.rules]
-      .filter(rule => rule.active)
-      .sort((a, b) => a.priority - b.priority);
-
-    for (const rule of sortedRules) {
-      const ruleScore = this.evaluateRule(rule, office, request, clinician);
-      score.score += ruleScore.score;
-      if (ruleScore.score > 0) {
-        score.reasons.push(ruleScore.reason);
-        score.log.push(...ruleScore.log);
-      }
-    }
-
-    // 4. Apply client preferences if available
-    if (this.clientPreference) {
-      const prefScore = this.evaluateClientPreferences(office);
-      score.score += prefScore.score;
-      if (prefScore.score > 0) {
-        score.reasons.push(...prefScore.reasons);
-        score.log.push(...prefScore.log);
-      }
-    }
-
-    // 5. Apply session type specific scoring
-    const sessionScore = this.evaluateSessionType(office, request.sessionType);
-    score.score += sessionScore.score;
-    if (sessionScore.score > 0) {
-      score.reasons.push(sessionScore.reason);
-      score.log.push(...sessionScore.log);
-    }
-
-    score.log.push(`Final score for ${office.officeId}: ${score.score}`);
-    return score;
   }
 
   private evaluateRule(
@@ -435,30 +465,55 @@ export class OfficeAssignmentService {
     return false;
   }
 
-  private checkTimeConflicts(
+  private async checkTimeConflicts(
     request: SchedulingRequest,
     existingBookings: SchedulingRequest[]
-  ): SchedulingConflict[] {
-    const conflicts: SchedulingConflict[] = [];
-    const requestStart = new Date(request.dateTime);
-    const requestEnd = new Date(requestStart.getTime() + (request.duration * 60 * 1000));
+  ): Promise<SchedulingConflict[]> {
+    try {
+      const conflicts: SchedulingConflict[] = [];
+      const requestStart = new Date(request.dateTime);
+      const requestEnd = new Date(requestStart.getTime() + (request.duration * 60 * 1000));
 
-    existingBookings.forEach(booking => {
-      const bookingStart = new Date(booking.dateTime);
-      const bookingEnd = new Date(bookingStart.getTime() + (booking.duration * 60 * 1000));
+      for (const booking of existingBookings) {
+        try {
+          const bookingStart = new Date(booking.dateTime);
+          const bookingEnd = new Date(bookingStart.getTime() + (booking.duration * 60 * 1000));
 
-      if (requestStart < bookingEnd && requestEnd > bookingStart) {
-        conflicts.push({
-          officeId: this.standardizeOfficeId(request.clinicianId),
-          existingBooking: booking,
-          resolution: {
-            type: 'cannot-relocate',
-            reason: 'Time slot overlap with existing booking'
+          if (requestStart < bookingEnd && requestEnd > bookingStart) {
+            // Skip conflict check if both appointments are telehealth
+            if (request.sessionType === 'telehealth' && booking.sessionType === 'telehealth') {
+              continue;
+            }
+
+            const officeId = standardizeOfficeId(request.clinicianId);
+            
+            conflicts.push({
+              officeId,
+              existingBooking: booking,
+              resolution: {
+                type: 'cannot-relocate',
+                reason: `Time slot overlap with existing ${booking.sessionType} session`
+              }
+            });
           }
-        });
+        } catch (error) {
+          console.error('Error processing individual booking:', error);
+          continue;
+        }
       }
-    });
 
-    return conflicts;
+      return conflicts;
+
+    } catch (error) {
+      console.error('Error checking time conflicts:', error);
+      return [{
+        officeId: standardizeOfficeId(request.clinicianId),
+        existingBooking: existingBookings[0],
+        resolution: {
+          type: 'cannot-relocate',
+          reason: 'Error checking time conflicts'
+        }
+      }];
+    }
   }
 }

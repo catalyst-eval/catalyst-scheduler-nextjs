@@ -1,37 +1,41 @@
 // src/lib/scheduling/daily-summary-service.ts
 
 import type { 
-    DailyScheduleSummary,
-    AppointmentRecord
-  } from '@/types/scheduling';
-  import type { SheetOffice } from '@/types/sheets';
-  
-  export class DailySummaryService {
-    constructor(
-      private readonly offices: SheetOffice[],
-      private readonly appointments: AppointmentRecord[]
-    ) {}
-  
-    async generateDailySummary(date: string): Promise<DailyScheduleSummary> {
-      const conflicts: DailyScheduleSummary['conflicts'] = [];
-      const alerts: DailyScheduleSummary['alerts'] = [];
-      const officeUtilization = new Map<string, {
-        totalSlots: number;
-        bookedSlots: number;
-        specialNotes?: string[];
-      }>();
-  
-      // Initialize office utilization
-      this.offices.forEach(office => {
-        const officeAppointments = this.appointments.filter(
-          appt => appt.officeId === office.officeId
-        );
-  
-        officeUtilization.set(office.officeId, {
-          totalSlots: 8, // Assuming 8 hour workday
-          bookedSlots: officeAppointments.length,
-          specialNotes: office.isFlexSpace ? ['Flex space - coordinate with team'] : []
-        });
+  DailyScheduleSummary,
+  AppointmentRecord,
+  StandardOfficeId
+} from '@/types/scheduling';
+import type { SheetOffice } from '@/types/sheets';
+import { standardizeOfficeId } from '@/lib/util/office-id';
+
+export class DailySummaryService {
+  constructor(
+    private readonly offices: SheetOffice[],
+    private readonly appointments: AppointmentRecord[]
+  ) {}
+
+  // Update Map type to use StandardOfficeId
+  async generateDailySummary(date: string): Promise<DailyScheduleSummary> {
+    const conflicts: DailyScheduleSummary['conflicts'] = [];
+    const alerts: DailyScheduleSummary['alerts'] = [];
+    const officeUtilization = new Map<StandardOfficeId, {
+      totalSlots: number;
+      bookedSlots: number;
+      specialNotes?: string[];
+    }>();
+
+    // Standardize office IDs when initializing
+    this.offices.forEach(office => {
+      const standardizedId = standardizeOfficeId(office.officeId);
+      const officeAppointments = this.appointments.filter(
+        appt => standardizeOfficeId(appt.officeId) === standardizedId
+      );
+
+      officeUtilization.set(standardizedId, {
+        totalSlots: 8,
+        bookedSlots: officeAppointments.length,
+        specialNotes: office.isFlexSpace ? ['Flex space - coordinate with team'] : []
+      });
   
         // Check utilization
         if (officeAppointments.length / 8 > 0.9) {
@@ -61,7 +65,7 @@ import type {
                 type: 'double-booking',
                 description: `Schedule conflict in office ${office.officeId}`,
                 severity: 'high',
-                officeId: office.officeId,
+                officeId: standardizeOfficeId(office.officeId),
                 appointmentIds: [appt1.appointmentId, appt2.appointmentId]
               });
             }

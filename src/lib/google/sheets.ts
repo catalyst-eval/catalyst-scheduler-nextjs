@@ -13,6 +13,7 @@ import type {
 } from '@/types/sheets';
 
 import type { AppointmentRecord, StandardOfficeId } from '../../types/scheduling';
+import { standardizeOfficeId } from '@/lib/util/office-id';
 import { SheetsCacheService } from './sheets-cache';
 
 export enum AuditEventType {
@@ -249,59 +250,68 @@ export class GoogleSheetsService {
     
     const endOfDay = new Date(date);
     endOfDay.setHours(23, 59, 59, 999);
-
+  
     const appointments = await this.getAppointments(
       startOfDay.toISOString(),
       endOfDay.toISOString()
     );
-
+  
     if (officeId === 'all') {
       return appointments;
     }
-
-    return appointments.filter(appt => appt.officeId === officeId);
+  
+    const standardizedTargetId = standardizeOfficeId(officeId);
+    return appointments.filter(appt => standardizeOfficeId(appt.officeId) === standardizedTargetId);
   }
 
-  async addAppointment(appointment: AppointmentRecord): Promise<void> {
+  async addAppointment(appt: AppointmentRecord): Promise<void> {
     try {
+      const standardizedOfficeId = standardizeOfficeId(appt.officeId);
+      const standardizedSuggestedId = appt.suggestedOfficeId ? 
+        standardizeOfficeId(appt.suggestedOfficeId) : standardizedOfficeId;
+  
       const rowData = [
-        appointment.appointmentId,
-        appointment.clientId,
-        appointment.clientName,
-        appointment.clinicianId,
-        appointment.clinicianName,
-        appointment.officeId,
-        appointment.sessionType,
-        appointment.startTime,
-        appointment.endTime,
-        appointment.status,
-        appointment.lastUpdated,
-        appointment.source,
-        JSON.stringify(appointment.requirements || {}),
-        appointment.notes || ''
+        appt.appointmentId,
+        appt.clientId,
+        appt.clientName,
+        appt.clinicianId,
+        appt.clinicianName,
+        standardizedOfficeId,
+        appt.sessionType,
+        appt.startTime,
+        appt.endTime,
+        appt.status,
+        appt.lastUpdated,
+        appt.source,
+        JSON.stringify(appt.requirements || {}),
+        appt.notes || '',
+        standardizedSuggestedId // Column O for suggestedOfficeId
       ];
   
-      await this.appendRows('Appointments!A:N', [rowData]);
+      await this.appendRows('Appointments!A:O', [rowData]);
   
       await this.addAuditLog({
         timestamp: new Date().toISOString(),
         eventType: AuditEventType.APPOINTMENT_CREATED,
-        description: `Added appointment ${appointment.appointmentId}`,
+        description: `Added appointment ${appt.appointmentId}`,
         user: 'SYSTEM',
-        systemNotes: JSON.stringify(appointment)
+        systemNotes: JSON.stringify({
+          ...appt,
+          officeId: standardizedOfficeId,
+          suggestedOfficeId: standardizedSuggestedId
+        })
       });
   
-      await this.refreshCache('Appointments!A2:N');
+      await this.refreshCache('Appointments!A2:O');
     } catch (error) {
       console.error('Error adding appointment:', error);
       throw new Error('Failed to add appointment');
     }
   }
 
-  // In sheets.ts
   async getAppointments(startDate: string, endDate: string): Promise<AppointmentRecord[]> {
     try {
-      const values = await this.readSheet('Appointments!A2:V');  // Read all 22 columns
+      const values = await this.readSheet('Appointments!A2:O');
       
       if (!values || !Array.isArray(values)) {
         console.log('No appointments found in sheet');
@@ -313,62 +323,58 @@ export class GoogleSheetsService {
         dateRange: { startDate, endDate }
       });
   
-  const mappedAppointments: AppointmentRecord[] = values
-    .map(row => {
-      try {
-        const standardizeOfficeId = (id: string): StandardOfficeId => {
-          const match = id.match(/^([A-Z])-([a-z])$/);
-          if (match) return id as StandardOfficeId;
-          return 'A-a' as StandardOfficeId;
-        };
-  
-        const suggestedOffice = row[14] || row[5] || 'A-a'; // Use column O (suggestedOfficeId) or fall back to column F (officeId)
-        
-        const appointment: AppointmentRecord = {
-          appointmentId: row[0] || '',
-          clientId: row[1] || '',
-          clientName: row[2] || row[1] || '',
-          clinicianId: row[3] || '',
-          clinicianName: row[4] || row[3] || '',
-          officeId: standardizeOfficeId(suggestedOffice),
-          suggestedOfficeId: suggestedOffice,
-          sessionType: (row[6] || 'in-person') as 'in-person' | 'telehealth' | 'group' | 'family',
-          startTime: row[7] || '',
-          endTime: row[8] || '',
-          status: (row[9] || 'scheduled') as 'scheduled' | 'completed' | 'cancelled' | 'rescheduled',
-          lastUpdated: row[10] || new Date().toISOString(),
-          source: (row[11] || 'manual') as 'intakeq' | 'manual',
-          requirements: { accessibility: false, specialFeatures: [] },
-          notes: ''
-        };
-    
+      // First map and filter out nulls
+      const initialAppointments = values
+        .map(row => {
           try {
-            const requirementsStr = row[12]?.toString().trim();
-            if (requirementsStr) {
-              // Remove any control characters and clean the JSON string
-              const cleanJson = requirementsStr
-                .replace(/[\u0000-\u0019]+/g, '')
-                .replace(/\s+/g, ' ')
-                .trim();
-              appointment.requirements = JSON.parse(cleanJson);
+            // Get office IDs and standardize them
+            const assignedOffice = row[5] || 'A-a';
+            const suggestedOffice = row[14] || assignedOffice;
+            
+            const standardizedOfficeId = standardizeOfficeId(assignedOffice);
+            const standardizedSuggestedId = standardizeOfficeId(suggestedOffice);
+    
+            // Parse requirements with error handling
+            let requirements = { accessibility: false, specialFeatures: [] };
+            try {
+              const requirementsStr = row[12]?.toString().trim();
+              if (requirementsStr) {
+                const cleanJson = requirementsStr
+                  .replace(/[\u0000-\u0019]+/g, '')
+                  .replace(/\s+/g, ' ')
+                  .trim();
+                requirements = JSON.parse(cleanJson);
+              }
+            } catch (err) {
+              console.error('Error parsing requirements JSON:', err, {value: row[12]});
             }
-          } catch (err) {
-            console.error('Error parsing requirements JSON:', err, {value: row[12]});
+            
+            return {
+              appointmentId: row[0] || '',
+              clientId: row[1] || '',
+              clientName: row[2] || row[1] || '',
+              clinicianId: row[3] || '',
+              clinicianName: row[4] || row[3] || '',
+              officeId: standardizedOfficeId,
+              suggestedOfficeId: standardizedSuggestedId,
+              sessionType: (row[6] || 'in-person') as 'in-person' | 'telehealth' | 'group' | 'family',
+              startTime: row[7] || '',
+              endTime: row[8] || '',
+              status: (row[9] || 'scheduled') as 'scheduled' | 'completed' | 'cancelled' | 'rescheduled',
+              lastUpdated: row[10] || new Date().toISOString(),
+              source: (row[11] || 'manual') as 'intakeq' | 'manual',
+              requirements,
+              notes: row[13] || ''
+            } as AppointmentRecord;
+          } catch (error) {
+            console.error('Error mapping appointment row:', error, { row });
+            return null;
           }
-    
-          // Add notes if present
-          if (row[13]) {
-            appointment.notes = row[13];
-          }
-    
-          return appointment;
-        } catch (error) {
-          console.error('Error mapping appointment row:', error, { row });
-          return null;
-        }
-      })
-      .filter((appt): appt is AppointmentRecord => appt !== null)
-      .filter(appt => {
+        })
+        .filter((appt): appt is AppointmentRecord => appt !== null);
+
+      // Then filter by date
+      const mappedAppointments = initialAppointments.filter(appt => {
         try {
           const apptDate = new Date(appt.startTime).toISOString().split('T')[0];
           const targetDate = new Date(startDate).toISOString().split('T')[0];
@@ -388,16 +394,16 @@ export class GoogleSheetsService {
         }
       });
 
-    console.log('Appointment processing complete:', {
-      totalFound: mappedAppointments.length,
-      dateRange: { startDate, endDate }
-    });
+      console.log('Appointment processing complete:', {
+        totalFound: mappedAppointments.length,
+        dateRange: { startDate, endDate }
+      });
 
-    return mappedAppointments;
-  } catch (error) {
-    console.error('Error reading appointments:', error);
-    throw new Error('Failed to read appointments');
-  }
+      return mappedAppointments;
+    } catch (error) {
+      console.error('Error reading appointments:', error);
+      throw new Error('Failed to read appointments');
+    }
 }
 
   async updateAppointment(appointment: AppointmentRecord): Promise<void> {
