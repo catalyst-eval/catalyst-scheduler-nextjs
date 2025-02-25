@@ -1,0 +1,10 @@
+{
+    "Type": "Appointment Created",
+    "ClientId": 123,
+    "Appointment": {
+      "Id": "test-1",
+      "ClientName": "Test Client",
+      "StartDateIso": "2023-08-01T14:00:00Z",
+      "EndDateIso": "2023-08-01T15:00:00Z"
+    }
+  }

@@ -7,10 +7,12 @@ export interface IntakeQSignatureRequest extends Request {
 
 /**
  * Middleware to verify IntakeQ webhook signatures
- * This validates that the request is authentic and coming from IntakeQ
  */
 export function verifyIntakeQSignature(req: IntakeQSignatureRequest, res: Response, next: NextFunction) {
   try {
+    console.log('Starting signature verification...');
+    console.log('Headers:', JSON.stringify(req.headers));
+    
     const signature = req.headers['x-intakeq-signature'] as string;
     
     if (!signature) {
@@ -22,7 +24,7 @@ export function verifyIntakeQSignature(req: IntakeQSignatureRequest, res: Respon
       });
     }
 
-    // Get the raw body that was captured by the raw body parser
+    // Get the raw body
     const rawBody = req.rawBody;
     
     if (!rawBody) {
@@ -34,10 +36,37 @@ export function verifyIntakeQSignature(req: IntakeQSignatureRequest, res: Respon
       });
     }
 
+    console.log('Raw body length:', rawBody.length);
+    console.log('Raw body preview:', rawBody.substring(0, 100) + '...');
+
     // Validate the signature
-    const isValid = validateSignature(rawBody, signature);
+    const secret = process.env.INTAKEQ_WEBHOOK_SECRET;
     
-    if (!isValid) {
+    if (!secret) {
+      console.error('Missing INTAKEQ_WEBHOOK_SECRET environment variable');
+      return res.status(500).json({
+        success: false,
+        error: 'Webhook secret not configured',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    // Remove any quotes from the secret
+    const cleanSecret = secret.replace(/['"]/g, '');
+
+    // Create HMAC
+    const hmac = crypto.createHmac('sha256', cleanSecret);
+    hmac.update(rawBody);
+    const calculatedSignature = hmac.digest('hex');
+
+    console.log('Webhook Signature Validation:', {
+      signatureMatches: calculatedSignature === signature,
+      calculatedLength: calculatedSignature.length,
+      providedLength: signature.length,
+      payloadLength: rawBody.length,
+    });
+
+    if (calculatedSignature !== signature) {
       console.warn('Invalid signature in webhook request');
       return res.status(401).json({
         success: false,
@@ -46,7 +75,8 @@ export function verifyIntakeQSignature(req: IntakeQSignatureRequest, res: Respon
       });
     }
 
-    // Signature is valid, proceed to next middleware
+    console.log('Signature verified successfully!');
+    // Signature is valid, proceed
     next();
   } catch (error) {
     console.error('Error verifying webhook signature:', error);
@@ -56,60 +86,4 @@ export function verifyIntakeQSignature(req: IntakeQSignatureRequest, res: Respon
       timestamp: new Date().toISOString()
     });
   }
-}
-
-/**
- * Validate the HMAC signature from IntakeQ
- */
-function validateSignature(payload: string, signature: string): boolean {
-  try {
-    const secret = process.env.INTAKEQ_WEBHOOK_SECRET;
-    
-    if (!secret) {
-      console.error('Missing INTAKEQ_WEBHOOK_SECRET environment variable');
-      return false;
-    }
-
-    // Remove any quotes from the secret
-    const cleanSecret = secret.replace(/['"]/g, '');
-
-    // Create HMAC
-    const hmac = crypto.createHmac('sha256', cleanSecret);
-    hmac.update(payload);
-    const calculatedSignature = hmac.digest('hex');
-
-    console.log('Webhook Signature Validation:', {
-      signatureMatches: calculatedSignature === signature,
-      calculatedLength: calculatedSignature.length,
-      providedLength: signature.length,
-      payloadLength: payload.length,
-    });
-
-    return calculatedSignature === signature;
-  } catch (error) {
-    console.error('Webhook signature validation error:', error);
-    return false;
-  }
-}
-
-/**
- * Middleware to capture the raw request body for signature verification
- * This must be used before the JSON body parser
- */
-export function captureRawBody(req: IntakeQSignatureRequest, res: Response, next: NextFunction) {
-  let data = '';
-  
-  req.on('data', chunk => {
-    data += chunk;
-  });
-  
-  req.on('end', () => {
-    req.rawBody = data;
-    next();
-  });
-
-  req.on('error', (error) => {
-    console.error('Error capturing raw body:', error);
-    next(error);
-  });
 }
