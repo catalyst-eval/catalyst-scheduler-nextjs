@@ -16,6 +16,6 @@
       "@/*": ["src/*"]
     }
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "test-signature.js"],
   "exclude": ["node_modules", "dist", "**/*.test.ts"]
 }
