@@ -1,11 +1,11 @@
-// src/app/api/test/email/route.ts
-
 import { NextRequest, NextResponse } from 'next/server';
 import { EmailService } from '@/lib/email/service';
 import { GoogleSheetsService } from '@/lib/google/sheets';
 import { IntakeQService } from '@/lib/intakeq/service';
 import { EmailIntegrationTest } from '@/lib/test/email-integration';
 import { getGoogleAuthCredentials } from '@/lib/google/auth';
+
+export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
   try {

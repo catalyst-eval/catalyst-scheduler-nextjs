@@ -1,0 +1,15 @@
+{
+  "version": 2,
+  "regions": ["iad1"],
+  "buildCommand": "next build",
+  "installCommand": "npm install",
+  "env": {
+    "NEXT_PUBLIC_ENV": "production"
+  },
+  "crons": [
+    {
+      "path": "/api/scheduling/daily-assignments",
+      "schedule": "0 6 * * *"
+    }
+  ]
+}

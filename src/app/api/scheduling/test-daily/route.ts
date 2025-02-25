@@ -1,5 +1,3 @@
-// src/app/api/scheduling/test-daily/route.ts
-
 import { NextResponse } from 'next/server';
 import { initializeGoogleSheets } from '@/lib/google/auth';
 import { IntakeQService } from '@/lib/intakeq/service';
@@ -7,6 +5,8 @@ import { initializeEmailService } from '@/lib/email/config';
 import { EmailTemplates } from '@/lib/email/templates';
 import { DailyAssignmentService } from '@/lib/scheduling/daily-assignment-service';
 import { RecipientManagementService } from '@/lib/email/recipients';
+
+export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
   try {

@@ -40,13 +40,13 @@ export class IntakeQService {
       endEST.setHours(23, 59, 59, 999);
 
       console.log('Date ranges (EST):', {
-        start: startEST.toLocaleString('en-US', { timeZone: 'America/New_York' }),
-        end: endEST.toLocaleString('en-US', { timeZone: 'America/New_York' })
+        start: startEST.toISOString(),
+        end: endEST.toISOString()
       });
 
       const params = new URLSearchParams({
-        StartDate: startEST.getTime().toString(),
-        EndDate: endEST.getTime().toString(),
+        StartDate: startEST.toISOString(),
+        EndDate: endEST.toISOString(),
         Status: 'Confirmed,WaitingConfirmation,Pending',
         dateField: 'StartDateIso'
       });
@@ -57,8 +57,8 @@ export class IntakeQService {
         endpoint: '/appointments',
         params: Object.fromEntries(params),
         requestRange: {
-          start: startEST.toLocaleString('en-US', { timeZone: 'America/New_York' }),
-          end: endEST.toLocaleString('en-US', { timeZone: 'America/New_York' })
+          start: startEST.toISOString(),
+          end: endEST.toISOString()
         }
       });
 
@@ -80,7 +80,10 @@ export class IntakeQService {
           
           console.log(`Attempt ${attempt + 1} failed:`, {
             status: response.status,
-            error: lastError
+            error: lastError,
+            headers: Object.fromEntries(response.headers.entries()),
+            url: url,
+            requestHeaders: this.headers
           });
 
           attempt++;
@@ -90,7 +93,11 @@ export class IntakeQService {
           }
         } catch (error) {
           lastError = error instanceof Error ? error.message : 'Unknown error';
-          console.error(`Attempt ${attempt + 1} error:`, lastError);
+          console.log(`Attempt ${attempt + 1} error:`, {
+            error: lastError,
+            url: url,
+            requestHeaders: this.headers
+          });
           
           attempt++;
           if (attempt < this.MAX_RETRIES) {
@@ -101,7 +108,14 @@ export class IntakeQService {
       }
 
       if (!response || !response.ok) {
-        throw new Error(`IntakeQ API error after ${this.MAX_RETRIES} attempts: ${lastError}`);
+        const errorMessage = `IntakeQ API error after ${this.MAX_RETRIES} attempts: ${lastError}`;
+        console.error('Final error details:', {
+          attempts: attempt,
+          lastError,
+          requestUrl: url,
+          requestHeaders: this.headers
+        });
+        throw new Error(errorMessage);
       }
 
       const text = await response.text();
@@ -121,8 +135,8 @@ export class IntakeQService {
         console.log('Appointment comparison:', {
           id: appt.Id,
           client: appt.ClientName,
-          apptDate: apptEST.toLocaleString('en-US', { timeZone: 'America/New_York' }),
-          targetDate: targetEST.toLocaleString('en-US', { timeZone: 'America/New_York' }),
+          apptDate: apptEST.toISOString(),
+          targetDate: targetEST.toISOString(),
           matches: apptEST.getTime() === targetEST.getTime()
         });
 
@@ -205,9 +219,6 @@ export class IntakeQService {
     }
   }
 
-  /**
-   * Helper method to extract and standardize office ID from IntakeQ appointment
-   */
   private async getStandardizedOfficeId(appointment: IntakeQAppointment): Promise<StandardOfficeId> {
     try {
       // If appointment already has an office assignment from our system, use that
@@ -231,9 +242,6 @@ export class IntakeQService {
     }
   }
 
-  /**
-   * Validate if an office ID is properly formatted
-   */
   private isValidOfficeId(officeId: string): boolean {
     return /^[A-Z]-[a-z]$/.test(officeId);
   }

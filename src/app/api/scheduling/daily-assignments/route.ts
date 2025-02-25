@@ -1,5 +1,4 @@
-// src/app/api/scheduling/daily-assignments/route.ts
-
+import { type NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 import { initializeGoogleSheets } from '@/lib/google/auth';
 import { initializeEmailService } from '@/lib/email/config';
@@ -8,7 +7,10 @@ import { IntakeQService } from '@/lib/intakeq/service';
 import { DailyAssignmentService } from '@/lib/scheduling/daily-assignment-service';
 import { EmailTemplates } from '@/lib/email/templates';
 
-export async function GET(request: Request) {
+export const runtime = 'edge';
+export const maxDuration = 300;
+
+export async function GET(request: NextRequest) {
   try {
     // Initialize services
     const sheetsService = await initializeGoogleSheets();
@@ -72,7 +74,7 @@ export async function GET(request: Request) {
       }
     });
 
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Error processing daily assignments:', error);
     return NextResponse.json(
       { 
