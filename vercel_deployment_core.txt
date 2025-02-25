@@ -1,0 +1,1445 @@
+GOOGLE_SHEETS_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC0jVwFTDG0k/fr\nZWe2p59aXq3tLShY0RM260a4F+AKCVSQi89oIaRJb/LWdvGGPTf6xq9EnTE6yWkb\nssPg3L0rDnDyOU3cuhKzqrcvnv7mZF+osl10rlbnAEOKUsjzmNNkyqYfbT5x7nDt\nMG4ZvOfoMC5i4SjPQQeuRrpdTedMJ7BPku8lj0+86TLaAMFHptjyPlXLJYox59fw\nM5jHwGUxTiOpe1q6nlYpLgJB4qGSTtR/NhImgng54DVtonWmjofKGFsQyjh8k9zY\nftrbY89IOrTanOJj6BYy/lLqNWh+yMY66TA0633dwZIvQPSK3XpeytfGuxgBrJg3\nSMysRCqTAgMBAAECggEAOCzVKSbMPkFdfQVnb+qWR3E2zxjiOUQPpOIt9iAjiivd\n/j0psl3pNhoZJYYLXndUn/dKV+BKjV5WEBKeJCu5xZgwJwUSRy8zm2ftp+jhqQAo\nzR11u1R04FlyKirYsAXoG697YULFj4Ae7YVIdESUqOa4v/YLEvTKNXx3BomzAbu+\nGGb4k+HC0wirRX/hfmxX4iROsdR2ChVyW8gla2v/NO9cVa3PnlzxRGbF7gLaE9Kk\nK6diPNEF+Lgt/FQXhvNyqovcTz/sJg3HDIeiXHufCQKTOhn/PwK9IwFe8Awkhb3E\nRadesMYEhPegXmpzO1wh//Wb+ewYWT3U6Xuptj5jrQKBgQD7CbubCFeVdsAGv38A\n1VJAPJG1zd4RzmCg8PpTQtTkz9nZdGjcgnGutGD8xS3UuGSNH8Bwotj76bLeITis\nIn7lHEplFdYBtZbiZaykvQUQ133LlJXfteioeVL1JvcMZpWylLFiOJml+h96pPJy\n8ejS1qHPUSrpvBGKbo8M2xW1tQKBgQC4HvbSnM78bzvxukJjLdB3G1Qj66M8RO0F\n4SRnILOmSOCUF5qozah+Yo1Gtl4B3kTZhTey+cGRiL28/Iz+KgYvu6CKBqCH4czP\nboM0eo+JxWTeBBFNFGhyvoC/3g9NoGKCRW5FBDoF5yjFIsgRHu4r7ZVZ2INz90x4\nk/6EIE0MJwKBgQCqmhCu6VpsLsmNTHKJJG/DS+ZSQVfbjf9JILtd/hskbMTF7UCe\nKuALNHZ9EZt15uIeridf5KvFdyqhnr4e7UqDdVhxngdUHg4uSZ6sTfC1Y10QDyhT\nYhJ8/AaOqC5YdRbix/5Mm95/V54xAQvrZc8uCcLpW2XodnENPNlmiTUVyQKBgCQj\n787neLmUG/AW33EYTRMUCjAC0MfDv8Knrr2PbbP2Gh73gyQfOjOUpKZ8pXc4actI\nmuZGn/gxHw05hXNeTFiSO7DcHCaP6+PLjXV/mS0x0drCcaLvnpDnU95VeCuEj9GC\nT2K8sab2+Mm5SgwSRi3ZNLeuCB97K0d/xTWqIXWBAoGBAMlUU3kqGbHdqPTRchTa\nYKMU+CW9UflNS1sI0fAn2VeeJGxBh0pCAI63qO89poX/7SbvQC/BIKs/kfBQssJC\nUGGfLbI+LxkhKqRgfmvtoHmTQbtDH19TUiyW6tZS2IyPZZZIomKfhRGjLZTpL/hL\nl/cncBU+k1+ZFa9Gds1rSUeo\n-----END PRIVATE KEY-----\n"
+GOOGLE_SHEETS_CLIENT_EMAIL="catalyst-scheduler@catalyst-scheduler-450218.iam.gserviceaccount.com"
+GOOGLE_SHEETS_SPREADSHEET_ID="1Z24JrO9bzn9wDDt8ii9ysuNZTVpDbZtHIMhivzEeu8Q"
+INTAKEQ_WEBHOOK_SECRET="4d09efc26afdcd6d84a34ba14dfbcca8750913aa4b95c4ca5e34567b8db38a42"
+INTAKEQ_API_KEY="a4e88eb5bde8666bb8d5462beeeef7bf78ae80fd"
+SENDGRID_API_KEY="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"
+EMAIL_FROM_ADDRESS="admin@catalysthealth.care"
+EMAIL_FROM_NAME="Catalyst Scheduler"{
+  "version": 2,
+  "regions": ["iad1"],
+  "crons": [
+    {
+      "path": "/api/scheduling/daily-assignments",
+      "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/scheduling/cleanup",
+      "schedule": "0 1 * * *"
+    }
+  ],
+  "functions": {
+    "/api/scheduling/daily-assignments": {
+      "maxDuration": 60,
+      "memory": 1024,
+      "runtime": "edge"
+    },
+    "/api/scheduling/cleanup": {
+      "maxDuration": 60,
+      "memory": 512,
+      "runtime": "edge"
+    },
+    "/api/webhooks/intakeq": {
+      "maxDuration": 60,
+      "memory": 512,
+      "runtime": "edge"
+    },
+    "/api/test/email": {
+      "maxDuration": 60,
+      "memory": 512,
+      "runtime": "edge"
+    }
+  },
+  "env": {
+    "GOOGLE_SHEETS_PRIVATE_KEY": "@google_sheets_private_key",
+    "GOOGLE_SHEETS_CLIENT_EMAIL": "@google_sheets_client_email",
+    "GOOGLE_SHEETS_SPREADSHEET_ID": "@google_sheets_spreadsheet_id",
+    "INTAKEQ_API_KEY": "@intakeq_api_key",
+    "SENDGRID_API_KEY": "@sendgrid_api_key",
+    "EMAIL_FROM_ADDRESS": "@email_from_address",
+    "EMAIL_FROM_NAME": "@email_from_name"
+  },
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        {
+          "key": "Access-Control-Allow-Credentials",
+          "value": "true"
+        },
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "*"
+        },
+        {
+          "key": "Access-Control-Allow-Methods",
+          "value": "GET,OPTIONS,PATCH,DELETE,POST,PUT"
+        },
+        {
+          "key": "Access-Control-Allow-Headers",
+          "value": "X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, X-IntakeQ-Signature"
+        }
+      ]
+    }
+  ]
+}/** @type {import('next').NextConfig} */
+const nextConfig = {
+  experimental: {
+    serverActions: true,
+  },
+  eslint: {
+    ignoreDuringBuilds: true
+  },
+  typescript: {
+    ignoreBuildErrors: true
+  }
+}
+
+module.exports = nextConfigimport { NextResponse } from 'next/server';
+import { initializeGoogleSheets } from '@/lib/google/auth';
+import { IntakeQService } from '@/lib/intakeq/service';
+import { initializeEmailService } from '@/lib/email/config';
+import { EmailTemplates } from '@/lib/email/templates';
+import { DailyAssignmentService } from '@/lib/scheduling/daily-assignment-service';
+import { RecipientManagementService } from '@/lib/email/recipients';
+
+export const dynamic = 'force-dynamic';
+
+export async function GET(request: Request) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const requestedDate = searchParams.get('date') || '2025-02-17';
+    const testType = searchParams.get('test');
+    
+    console.log('Starting daily schedule test for:', requestedDate);
+    
+    // Create date in EST
+    const targetDate = new Date(requestedDate + 'T12:00:00.000Z'); // Use noon to avoid timezone edge cases
+    const estDateStr = targetDate.toLocaleString('en-US', { 
+      timeZone: 'America/New_York',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    });
+    
+    console.log('Timezone handling:', {
+      requested: requestedDate,
+      estDate: estDateStr,
+      isoString: targetDate.toISOString()
+    });
+    
+    // Convert to ISO string for consistency
+    const dateStr = targetDate.toISOString();
+    
+    console.log('Date configuration:', {
+      requested: requestedDate,
+      target: dateStr,
+      estLocal: targetDate.toLocaleString('en-US', { timeZone: 'America/New_York' })
+    });
+    
+    // Initialize services
+    const sheetsService = await initializeGoogleSheets();
+    console.log('Sheets service initialized');
+    
+    const intakeQService = new IntakeQService(
+      process.env.INTAKEQ_API_KEY!,
+      sheetsService
+    );
+    console.log('IntakeQ service initialized');
+
+    const emailService = await initializeEmailService(sheetsService);
+    console.log('Email service initialized');
+
+    // Get today's date in EST/EDT
+    const estDate = new Date(targetDate.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+    console.log('Testing for date:', estDate.toISOString().split('T')[0]);
+
+    // Test IntakeQ connection
+    const connected = await intakeQService.testConnection();
+    console.log('IntakeQ connection test:', connected);
+
+    if (!connected) {
+      throw new Error('Failed to connect to IntakeQ');
+    }
+
+    // Get appointments for the full target date
+    const startOfDay = `${dateStr.split('T')[0]}T00:00:00Z`;
+    const endOfDay = `${dateStr.split('T')[0]}T23:59:59Z`;
+    
+    console.log('Appointment search range:', {
+      startOfDay,
+      endOfDay,
+      timezone: 'UTC'
+    });
+
+    const appointments = await intakeQService.getAppointments(
+      startOfDay,
+      endOfDay
+    );
+    console.log('Retrieved appointments:', appointments.length);
+
+    // Use DailyAssignmentService to get full summary with office assignments
+    const assignmentService = new DailyAssignmentService(
+      sheetsService,
+      intakeQService
+    );
+    const summary = await assignmentService.generateDailySummary(dateStr);
+    console.log('Generated daily summary:', {
+      appointments: summary.appointments.length,
+      conflicts: summary.conflicts.length,
+      alerts: summary.alerts.length
+    });
+
+    // Create email template
+    const template = EmailTemplates.dailySchedule(summary);
+    console.log('Created email template');
+
+    // Send test email
+    await emailService.sendEmail(
+      [{
+        email: 'tyler@bridgefamilytherapy.com',
+        name: 'Tyler',
+        role: 'admin',
+        preferences: {
+          dailySchedule: true,
+          conflicts: true,
+          errors: true
+        }
+      }],
+      template,
+      {
+        type: 'schedule',
+        priority: summary.alerts.some(a => a.severity === 'high') ? 'high' : 'normal',
+        retryCount: 3
+      }
+    );
+    console.log('Email sent successfully');
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        date: dateStr,
+        appointments: summary.appointments.map(appt => ({
+          id: appt.appointmentId,
+          clientId: appt.clientId,
+          officeId: appt.officeId,
+          startTime: appt.startTime,
+          endTime: appt.endTime,
+          sessionType: appt.sessionType
+        })),
+        conflicts: summary.conflicts,
+        alerts: summary.alerts
+      }
+    });
+
+  } catch (error) {
+    console.error('Daily schedule test error:', error);
+    return NextResponse.json(
+      { 
+        success: false, 
+        error: error instanceof Error ? error.message : 'Unknown error occurred'
+      },
+      { status: 500 }
+    );
+  }
+}import { type NextRequest } from 'next/server';
+import { NextResponse } from 'next/server';
+import { initializeGoogleSheets } from '@/lib/google/auth';
+import { initializeEmailService } from '@/lib/email/config';
+import { RecipientManagementService } from '@/lib/email/recipients';
+import { IntakeQService } from '@/lib/intakeq/service';
+import { DailyAssignmentService } from '@/lib/scheduling/daily-assignment-service';
+import { EmailTemplates } from '@/lib/email/templates';
+
+export const runtime = 'edge';
+export const maxDuration = 300;
+
+export async function GET(request: NextRequest) {
+  try {
+    // Initialize services
+    const sheetsService = await initializeGoogleSheets();
+    const emailService = await initializeEmailService(sheetsService);
+    const intakeQService = new IntakeQService(
+      process.env.INTAKEQ_API_KEY!,
+      sheetsService
+    );
+    const recipientService = new RecipientManagementService(sheetsService);
+
+    // Get date from query parameters or use today
+    const url = new URL(request.url);
+    const targetDate = url.searchParams.get('date') || new Date().toISOString().split('T')[0];
+    console.log('Generating assignments for:', targetDate);
+
+    // Test IntakeQ connection
+    console.log('Testing IntakeQ connection...');
+    const connected = await intakeQService.testConnection();
+    if (!connected) {
+      console.error('Failed to connect to IntakeQ API');
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: 'Failed to connect to IntakeQ API'
+        },
+        { status: 500 }
+      );
+    }
+    console.log('IntakeQ connection successful');
+    
+    // Generate daily summary with both services
+    const dailyAssignmentService = new DailyAssignmentService(
+      sheetsService,
+      intakeQService
+    );
+    
+    console.log('Fetching daily summary...');
+    const summary = await dailyAssignmentService.generateDailySummary(targetDate);
+    console.log('Summary generated with', summary.appointments.length, 'appointments');
+
+    // Get recipients and send email
+    const recipients = await recipientService.getDailyScheduleRecipients();
+    const template = EmailTemplates.dailySchedule(summary);
+    
+    console.log('Sending email to', recipients.length, 'recipients');
+    await emailService.sendEmail(recipients, template, {
+      type: 'schedule',
+      priority: summary.alerts.some(a => a.severity === 'high') ? 'high' : 'normal',
+      retryCount: 3
+    });
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        date: targetDate,
+        appointmentCount: summary.appointments.length,
+        conflicts: summary.conflicts,
+        alerts: summary.alerts,
+        officeUtilization: Object.fromEntries(summary.officeUtilization),
+        recipientCount: recipients.length
+      }
+    });
+
+  } catch (error: unknown) {
+    console.error('Error processing daily assignments:', error);
+    return NextResponse.json(
+      { 
+        success: false, 
+        error: error instanceof Error ? error.message : 'Failed to process daily assignments'
+      },
+      { status: 500 }
+    );
+  }
+}import { type NextRequest } from 'next/server';
+import { NextResponse } from 'next/server';
+import { GoogleSheetsService } from '@/lib/google/sheets';
+import { IntakeQService } from '@/lib/intakeq/service';
+import { getGoogleAuthCredentials } from '@/lib/google/auth';
+import { AppointmentSyncHandler } from '@/lib/intakeq/appointment-sync';
+import { EmailService } from '@/lib/email/service';
+
+export const runtime = 'edge';
+export const maxDuration = 60;
+
+export async function POST(req: NextRequest) {
+  try {
+    const signature = req.headers.get('X-IntakeQ-Signature');
+    if (!signature) {
+      return NextResponse.json({ 
+        success: false, 
+        error: 'Missing signature',
+        timestamp: new Date().toISOString() 
+      }, { status: 401 });
+    }
+
+    const payload = await req.json();
+
+    console.log('Received webhook:', { 
+      type: payload.EventType || payload.Type,
+      clientId: payload.ClientId,
+      appointmentId: payload.Appointment?.Id
+    });
+
+    // Initialize services
+    const credentials = getGoogleAuthCredentials();
+    const spreadsheetId = process.env.GOOGLE_SHEETS_SPREADSHEET_ID;
+    
+    if (!spreadsheetId) {
+      throw new Error('Missing spreadsheet ID configuration');
+    }
+
+    const sheetsService = new GoogleSheetsService(credentials, spreadsheetId);
+    
+    const intakeQService = new IntakeQService(
+      process.env.INTAKEQ_API_KEY || '',
+      sheetsService
+    );
+
+    const emailService = new EmailService(
+      process.env.SENDGRID_API_KEY || '',
+      process.env.EMAIL_FROM_ADDRESS || '',
+      process.env.EMAIL_FROM_NAME || '',
+      sheetsService
+    );
+
+    console.log('Services initialized');
+
+    // Create appointment sync handler
+    const syncHandler = new AppointmentSyncHandler(
+      sheetsService,
+      intakeQService,
+      emailService
+    );
+
+    // Handle the webhook event
+    const eventType = payload.EventType || payload.Type;
+    
+    if (!eventType) {
+      console.warn('Missing event type in webhook payload');
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: 'Missing event type',
+          timestamp: new Date().toISOString()
+        },
+        { status: 400 }
+      );
+    }
+
+    console.log('Processing webhook event:', eventType);
+
+    const result = await syncHandler.processAppointmentEvent(payload);
+
+    console.log('Webhook event processed:', result);
+
+    if (!result.success) {
+      return NextResponse.json({
+        success: false,
+        error: result.error,
+        details: result.details,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    return NextResponse.json({
+      success: true,
+      data: result.details,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error: unknown) {
+    console.error('Webhook processing error:', error);
+    
+    return NextResponse.json(
+      {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error occurred',
+        timestamp: new Date().toISOString()
+      },
+      { status: 500 }
+    );
+  }
+}// src/lib/google/sheets.ts
+
+import { google } from 'googleapis';
+import { JWT } from 'google-auth-library';
+import type { 
+  SheetOffice, 
+  SheetClinician, 
+  AssignmentRule, 
+  ClientPreference,
+  ScheduleConfig,
+  IntegrationSetting,
+  AuditLogEntry 
+} from '@/types/sheets';
+
+import type { AppointmentRecord, StandardOfficeId } from '../../types/scheduling';
+import { standardizeOfficeId } from '@/lib/util/office-id';
+import { SheetsCacheService } from './sheets-cache';
+
+export enum AuditEventType {
+  CONFIG_UPDATED = 'CONFIG_UPDATED',
+  RULE_CREATED = 'RULE_CREATED',
+  RULE_UPDATED = 'RULE_UPDATED',
+  CLIENT_PREFERENCES_UPDATED = 'CLIENT_PREFERENCES_UPDATED',
+  CLIENT_OFFICE_ASSIGNED = 'CLIENT_OFFICE_ASSIGNED',
+  APPOINTMENT_CREATED = 'APPOINTMENT_CREATED',
+  APPOINTMENT_UPDATED = 'APPOINTMENT_UPDATED',
+  APPOINTMENT_CANCELLED = 'APPOINTMENT_CANCELLED',
+  APPOINTMENT_DELETED = 'APPOINTMENT_DELETED',
+  SYSTEM_ERROR = 'SYSTEM_ERROR',
+  WEBHOOK_RECEIVED = 'WEBHOOK_RECEIVED',
+  INTEGRATION_UPDATED = 'INTEGRATION_UPDATED',
+  DAILY_ASSIGNMENTS_UPDATED = 'DAILY_ASSIGNMENTS_UPDATED',
+  CRITICAL_ERROR = 'CRITICAL_ERROR'
+}
+
+export class GoogleSheetsService {
+  private sheets;
+  private spreadsheetId: string;
+  private cache: SheetsCacheService;
+
+  constructor(credentials: any, spreadsheetId: string) {
+    const client = new JWT({
+      email: credentials.client_email,
+      key: credentials.private_key,
+      scopes: ['https://www.googleapis.com/auth/spreadsheets']
+    });
+
+    this.sheets = google.sheets({ version: 'v4', auth: client });
+    this.spreadsheetId = spreadsheetId;
+    this.cache = new SheetsCacheService();
+  }
+
+  private async readSheet(range: string) {
+    const cacheKey = `sheet:${range}`;
+    
+    try {
+      return await this.cache.getOrFetch(
+        cacheKey,
+        async () => {
+          console.log(`Reading sheet range: ${range}`);
+          const response = await this.sheets.spreadsheets.values.get({
+            spreadsheetId: this.spreadsheetId,
+            range,
+          });
+          return response.data.values;
+        },
+        60000 // 1 minute cache TTL
+      );
+    } catch (error) {
+      console.error(`Error reading sheet ${range}:`, error);
+      await this.addAuditLog({
+        timestamp: new Date().toISOString(),
+        eventType: AuditEventType.SYSTEM_ERROR,
+        description: `Failed to read sheet ${range}`,
+        user: 'SYSTEM',
+        systemNotes: JSON.stringify(error)
+      });
+      throw new Error(`Failed to read sheet ${range}`);
+    }
+  }
+
+  private async appendRows(range: string, values: any[][]) {
+    try {
+      await this.sheets.spreadsheets.values.append({
+        spreadsheetId: this.spreadsheetId,
+        range,
+        valueInputOption: 'RAW',
+        requestBody: {
+          values
+        }
+      });
+    } catch (error) {
+      console.error(`Error appending to sheet ${range}:`, error);
+      throw error;
+    }
+  }
+
+  async getOffices(): Promise<SheetOffice[]> {
+    const values = await this.readSheet('Offices Configuration!A2:M');
+    
+    return values?.map(row => ({
+      officeId: row[0],
+      name: row[1],
+      unit: row[2],
+      inService: row[3] === 'TRUE',
+      floor: row[4] as 'upstairs' | 'downstairs',
+      isAccessible: row[5] === 'TRUE',
+      size: row[6] as 'small' | 'medium' | 'large',
+      ageGroups: row[7]?.split(',').map((s: string) => s.trim()) || [],
+      specialFeatures: row[8]?.split(',').map((s: string) => s.trim()) || [],
+      primaryClinician: row[9] || undefined,
+      alternativeClinicians: row[10]?.split(',').map((s: string) => s.trim()) || [],
+      isFlexSpace: row[11] === 'TRUE',
+      notes: row[12]
+    })) ?? [];
+  }
+
+  async getClinicians(): Promise<SheetClinician[]> {
+    const values = await this.readSheet('Clinicians Configuration!A2:M');
+    
+    return values?.map(row => ({
+      clinicianId: row[0],
+      name: row[1],
+      email: row[2],
+      role: row[3] as 'owner' | 'admin' | 'clinician' | 'intern',
+      ageRangeMin: Number(row[4]),
+      ageRangeMax: Number(row[5]),
+      specialties: row[6]?.split(',').map((s: string) => s.trim()) || [],
+      caseloadLimit: Number(row[7]),
+      currentCaseload: Number(row[8]),
+      preferredOffices: row[9]?.split(',').map((s: string) => s.trim()) || [],
+      allowsRelationship: row[10] === 'TRUE',
+      certifications: row[11]?.split(',').map((s: string) => s.trim()) || [],
+      intakeQPractitionerId: row[12]
+    })) ?? [];
+  }
+
+  async getAssignmentRules(): Promise<AssignmentRule[]> {
+    const values = await this.readSheet('Assignment Rules!A2:H');
+    
+    return values?.map(row => ({
+      priority: Number(row[0]),
+      ruleName: row[1],
+      ruleType: row[2],
+      condition: row[3],
+      officeIds: row[4]?.split(',').map((s: string) => s.trim()) || [],
+      overrideLevel: row[5] as 'hard' | 'soft' | 'none',
+      active: row[6] === 'TRUE',
+      notes: row[7]
+    })) ?? [];
+  }
+
+  async getClientPreferences(): Promise<ClientPreference[]> {
+    const values = await this.readSheet('Client Preferences!A2:L');
+    
+    return values?.map(row => ({
+      clientId: row[0],
+      name: row[1],
+      email: row[2],
+      mobilityNeeds: JSON.parse(row[3] || '[]'),
+      sensoryPreferences: JSON.parse(row[4] || '[]'),
+      physicalNeeds: JSON.parse(row[5] || '[]'),
+      roomConsistency: Number(row[6]),
+      supportNeeds: JSON.parse(row[7] || '[]'),
+      specialFeatures: [], // Added required field with default empty array
+      additionalNotes: row[8],
+      lastUpdated: row[9],
+      preferredClinician: row[10],
+      assignedOffice: row[11]
+    })) ?? [];
+  }
+
+  async getScheduleConfig(): Promise<ScheduleConfig[]> {
+    const values = await this.readSheet('Schedule Configuration!A2:E');
+    
+    return values?.map(row => ({
+      settingName: row[0],
+      value: row[1],
+      description: row[2],
+      lastUpdated: row[3],
+      updatedBy: row[4]
+    })) ?? [];
+  }
+
+  async getIntegrationSettings(): Promise<IntegrationSetting[]> {
+    const values = await this.readSheet('Integration Settings!A2:E');
+    
+    return values?.map(row => ({
+      serviceName: row[0],
+      settingType: row[1],
+      value: row[2],
+      description: row[3],
+      lastUpdated: row[4]
+    })) ?? [];
+  }
+
+  async addAuditLog(entry: AuditLogEntry): Promise<void> {
+    try {
+      const rowData = [
+        entry.timestamp,
+        entry.eventType,
+        entry.description,
+        entry.user,
+        entry.previousValue || '',
+        entry.newValue || '',
+        entry.systemNotes || ''
+      ];
+
+      await this.appendRows('Audit Log!A:G', [rowData]);
+      console.log('Audit log entry added:', entry);
+    } catch (error) {
+      console.error('Error adding audit log:', error);
+      console.error('Failed audit log entry:', entry);
+    }
+  }
+
+  async getRecentAuditLogs(limit: number = 5): Promise<AuditLogEntry[]> {
+    try {
+      const values = await this.readSheet('Audit Log!A2:G');
+      
+      if (!values) return [];
+      
+      if (!values || !Array.isArray(values)) {
+        console.log('No appointments found in sheet');
+        return [];
+      }
+      
+      return values
+        .map(row => ({
+          timestamp: row[0],
+          eventType: row[1],
+          description: row[2],
+          user: row[3],
+          previousValue: row[4] || undefined,
+          newValue: row[5] || undefined,
+          systemNotes: row[6] || undefined
+        }))
+        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+        .slice(0, limit);
+        
+    } catch (error) {
+      console.error('Error reading audit logs:', error);
+      return [];
+    }
+  }
+
+  async getOfficeAppointments(officeId: string, date: string): Promise<AppointmentRecord[]> {
+    const startOfDay = new Date(date);
+    startOfDay.setHours(0, 0, 0, 0);
+    
+    const endOfDay = new Date(date);
+    endOfDay.setHours(23, 59, 59, 999);
+  
+    const appointments = await this.getAppointments(
+      startOfDay.toISOString(),
+      endOfDay.toISOString()
+    );
+  
+    if (officeId === 'all') {
+      return appointments;
+    }
+  
+    const standardizedTargetId = standardizeOfficeId(officeId);
+    return appointments.filter(appt => standardizeOfficeId(appt.officeId) === standardizedTargetId);
+  }
+
+  async addAppointment(appt: AppointmentRecord): Promise<void> {
+    try {
+      const standardizedOfficeId = standardizeOfficeId(appt.officeId);
+      const standardizedSuggestedId = appt.suggestedOfficeId ? 
+        standardizeOfficeId(appt.suggestedOfficeId) : standardizedOfficeId;
+  
+      const rowData = [
+        appt.appointmentId,
+        appt.clientId,
+        appt.clientName,
+        appt.clinicianId,
+        appt.clinicianName,
+        standardizedOfficeId,
+        appt.sessionType,
+        appt.startTime,
+        appt.endTime,
+        appt.status,
+        appt.lastUpdated,
+        appt.source,
+        JSON.stringify(appt.requirements || {}),
+        appt.notes || '',
+        standardizedSuggestedId // Column O for suggestedOfficeId
+      ];
+  
+      await this.appendRows('Appointments!A:O', [rowData]);
+  
+      await this.addAuditLog({
+        timestamp: new Date().toISOString(),
+        eventType: AuditEventType.APPOINTMENT_CREATED,
+        description: `Added appointment ${appt.appointmentId}`,
+        user: 'SYSTEM',
+        systemNotes: JSON.stringify({
+          ...appt,
+          officeId: standardizedOfficeId,
+          suggestedOfficeId: standardizedSuggestedId
+        })
+      });
+  
+      await this.refreshCache('Appointments!A2:O');
+    } catch (error) {
+      console.error('Error adding appointment:', error);
+      throw new Error('Failed to add appointment');
+    }
+  }
+
+  async getAppointments(startDate: string, endDate: string): Promise<AppointmentRecord[]> {
+    try {
+      const values = await this.readSheet('Appointments!A2:O');
+      
+      if (!values || !Array.isArray(values)) {
+        console.log('No appointments found in sheet');
+        return [];
+      }
+  
+      console.log('Processing appointments from sheet:', {
+        rowCount: values.length,
+        dateRange: { startDate, endDate }
+      });
+  
+      // First map and filter out nulls
+      const initialAppointments = values
+        .map(row => {
+          try {
+            // Get office IDs and standardize them
+            const assignedOffice = row[5] || 'A-a';
+            const suggestedOffice = row[14] || assignedOffice;
+            
+            const standardizedOfficeId = standardizeOfficeId(assignedOffice);
+            const standardizedSuggestedId = standardizeOfficeId(suggestedOffice);
+    
+            // Parse requirements with error handling
+            let requirements = { accessibility: false, specialFeatures: [] };
+            try {
+              const requirementsStr = row[12]?.toString().trim();
+              if (requirementsStr) {
+                const cleanJson = requirementsStr
+                  .replace(/[\u0000-\u0019]+/g, '')
+                  .replace(/\s+/g, ' ')
+                  .trim();
+                requirements = JSON.parse(cleanJson);
+              }
+            } catch (err) {
+              console.error('Error parsing requirements JSON:', err, {value: row[12]});
+            }
+            
+            return {
+              appointmentId: row[0] || '',
+              clientId: row[1] || '',
+              clientName: row[2] || row[1] || '',
+              clinicianId: row[3] || '',
+              clinicianName: row[4] || row[3] || '',
+              officeId: standardizedOfficeId,
+              suggestedOfficeId: standardizedSuggestedId,
+              sessionType: (row[6] || 'in-person') as 'in-person' | 'telehealth' | 'group' | 'family',
+              startTime: row[7] || '',
+              endTime: row[8] || '',
+              status: (row[9] || 'scheduled') as 'scheduled' | 'completed' | 'cancelled' | 'rescheduled',
+              lastUpdated: row[10] || new Date().toISOString(),
+              source: (row[11] || 'manual') as 'intakeq' | 'manual',
+              requirements,
+              notes: row[13] || ''
+            } as AppointmentRecord;
+          } catch (error) {
+            console.error('Error mapping appointment row:', error, { row });
+            return null;
+          }
+        })
+        .filter((appt): appt is AppointmentRecord => appt !== null);
+
+      // Then filter by date
+      const mappedAppointments = initialAppointments.filter(appt => {
+        try {
+          const apptDate = new Date(appt.startTime).toISOString().split('T')[0];
+          const targetDate = new Date(startDate).toISOString().split('T')[0];
+          
+          console.log('Filtering appointment:', {
+            id: appt.appointmentId,
+            date: apptDate,
+            target: targetDate,
+            match: apptDate === targetDate,
+            startTime: appt.startTime
+          });
+          
+          return apptDate === targetDate;
+        } catch (error) {
+          console.error('Error filtering appointment:', error, { appt });
+          return false;
+        }
+      });
+
+      console.log('Appointment processing complete:', {
+        totalFound: mappedAppointments.length,
+        dateRange: { startDate, endDate }
+      });
+
+      return mappedAppointments;
+    } catch (error) {
+      console.error('Error reading appointments:', error);
+      throw new Error('Failed to read appointments');
+    }
+}
+
+  async updateAppointment(appointment: AppointmentRecord): Promise<void> {
+    try {
+      const values = await this.readSheet('Appointments!A:A');
+      const appointmentRow = values?.findIndex(row => row[0] === appointment.appointmentId);
+
+      if (!values || !appointmentRow || appointmentRow < 0) {
+        throw new Error(`Appointment ${appointment.appointmentId} not found`);
+      }
+
+      const rowData = [
+        appointment.appointmentId,
+        appointment.clientId,
+        appointment.clinicianId,
+        appointment.officeId,
+        appointment.sessionType,
+        appointment.startTime,
+        appointment.endTime,
+        appointment.status,
+        appointment.lastUpdated,
+        appointment.source,
+        JSON.stringify(appointment.requirements || {}),
+        appointment.notes || ''
+      ];
+
+      await this.sheets.spreadsheets.values.update({
+        spreadsheetId: this.spreadsheetId,
+        range: `Appointments!A${appointmentRow + 1}:L${appointmentRow + 1}`,
+        valueInputOption: 'RAW',
+        requestBody: {
+          values: [rowData]
+        }
+      });
+
+      await this.addAuditLog({
+        timestamp: new Date().toISOString(),
+        eventType: AuditEventType.APPOINTMENT_UPDATED,
+        description: `Updated appointment ${appointment.appointmentId}`,
+        user: 'SYSTEM',
+        previousValue: JSON.stringify(values[appointmentRow]),
+        newValue: JSON.stringify(rowData)
+      });
+
+      await this.refreshCache('Appointments!A2:N');
+    } catch (error) {
+      console.error('Error updating appointment:', error);
+      throw new Error('Failed to update appointment');
+    }
+  }
+
+  // Add after the updateAppointment method:
+  async getAppointment(appointmentId: string): Promise<AppointmentRecord | null> {
+    try {
+      const values = await this.readSheet('Appointments!A2:N');
+      if (!values) return null;
+  
+      const appointmentRow = values.find(row => row[0] === appointmentId);
+      if (!appointmentRow) return null;
+  
+      return {
+        appointmentId: appointmentRow[0],
+        clientId: appointmentRow[1],
+        clientName: appointmentRow[2],
+        clinicianId: appointmentRow[3],
+        clinicianName: appointmentRow[4],
+        officeId: appointmentRow[5],
+        sessionType: appointmentRow[6] as 'in-person' | 'telehealth' | 'group' | 'family',
+        startTime: appointmentRow[7],
+        endTime: appointmentRow[8],
+        status: appointmentRow[9] as 'scheduled' | 'completed' | 'cancelled' | 'rescheduled',
+        lastUpdated: appointmentRow[10],
+        source: appointmentRow[11] as 'intakeq' | 'manual',
+        requirements: JSON.parse(appointmentRow[12] || '{}'),
+        notes: appointmentRow[13]
+      };
+    } catch (error) {
+      console.error('Error getting appointment:', error);
+      return null;
+    }
+  }
+
+
+async deleteAppointment(appointmentId: string): Promise<void> {
+  try {
+    const values = await this.readSheet('Appointments!A:A');
+    const appointmentRow = values?.findIndex(row => row[0] === appointmentId);
+
+    if (!values || !appointmentRow || appointmentRow < 0) {
+      throw new Error(`Appointment ${appointmentId} not found`);
+    }
+
+    await this.sheets.spreadsheets.values.clear({
+      spreadsheetId: this.spreadsheetId,
+      range: `Appointments!A${appointmentRow + 1}:L${appointmentRow + 1}`
+    });
+
+    await this.refreshCache('Appointments!A2:N');
+  } catch (error) {
+    console.error('Error deleting appointment:', error);
+    throw new Error('Failed to delete appointment');
+  }
+}
+
+  async updateClientPreference(preference: ClientPreference): Promise<void> {
+    try {
+      const values = await this.readSheet('Client Preferences!A:A');
+      const clientRow = values?.findIndex(row => row[0] === preference.clientId);
+      
+      const rowData = [
+        preference.clientId,
+        preference.name,
+        preference.email,
+        JSON.stringify(preference.mobilityNeeds),
+        JSON.stringify(preference.sensoryPreferences),
+        JSON.stringify(preference.physicalNeeds),
+        preference.roomConsistency.toString(),
+        JSON.stringify(preference.supportNeeds),
+        preference.additionalNotes || '',
+        new Date().toISOString(),
+        preference.preferredClinician || '',
+        preference.assignedOffice || ''
+      ];
+
+      if (clientRow && clientRow > 0) {
+        await this.sheets.spreadsheets.values.update({
+          spreadsheetId: this.spreadsheetId,
+          range: `Client Preferences!A${clientRow + 1}`,
+          valueInputOption: 'RAW',
+          requestBody: {
+            values: [rowData]
+          }
+        });
+      } else {
+        await this.appendRows('Client Preferences!A:L',
+          [rowData]);
+        }
+  
+        await this.addAuditLog({
+          timestamp: new Date().toISOString(),
+          eventType: AuditEventType.CLIENT_PREFERENCES_UPDATED,
+          description: `Updated preferences for client ${preference.clientId}`,
+          user: 'SYSTEM',
+          systemNotes: JSON.stringify(preference)
+        });
+  
+        await this.refreshCache('Client Preferences!A2:L');
+  
+      } catch (error) {
+        console.error('Error updating client preference:', error);
+        throw error;
+      }
+    }
+    
+    private extractMobilityNeeds(responses: Record<string, any>): string[] {
+      const needs: string[] = [];
+      
+      const mobilityField = responses['Do you use any mobility devices?'] || [];
+      if (Array.isArray(mobilityField)) {
+        if (mobilityField.includes('Wheelchair')) needs.push('wheelchair_access');
+        if (mobilityField.includes('Crutches')) needs.push('mobility_aid_crutches');
+        if (mobilityField.includes('Walking boot')) needs.push('mobility_aid_boot');
+      }
+      
+      const otherMobility = responses['Access needs related to mobility/disability (Please specify)'];
+      if (otherMobility) needs.push(otherMobility);
+      
+      return needs;
+    }
+    
+    private extractSensoryPreferences(responses: Record<string, any>): string[] {
+      const preferences: string[] = [];
+      
+      const sensoryField = responses['Do you experience sensory sensitivities?'] || [];
+      if (Array.isArray(sensoryField)) {
+        if (sensoryField.includes('Light sensitivity')) preferences.push('light_sensitive');
+        if (sensoryField.includes('Preference for only natural light')) preferences.push('natural_light');
+        if (sensoryField.includes('Auditory sensitivity')) preferences.push('sound_sensitive');
+      }
+      
+      const otherSensory = responses['Other (Please specify):'];
+      if (otherSensory) preferences.push(otherSensory);
+      
+      return preferences;
+    }
+    
+    private extractPhysicalNeeds(responses: Record<string, any>): string[] {
+      const needs: string[] = [];
+      
+      const physicalField = responses['Do you experience challenges with physical environment?'] || [];
+      if (Array.isArray(physicalField)) {
+        if (physicalField.includes('Seating support')) needs.push('seating_support');
+        if (physicalField.includes('Difficulty with stairs')) needs.push('no_stairs');
+        if (physicalField.includes('Need to see the door')) needs.push('door_visible');
+      }
+      
+      return needs;
+    }
+    
+    private extractRoomConsistency(responses: Record<string, any>): number {
+      const value = responses['Please indicate your comfort level with this possibility:'];
+      const consistencyMap: Record<string, number> = {
+        '1 - Strong preference for consistency': 5,
+        '2 - High preference for consistency': 4,
+        '3 - Neutral about room changes': 3,
+        '4 - Somewhat comfortable with room changes when needed': 2,
+        '5 - Very comfortable with room changes when needed': 1
+      };
+      
+      return consistencyMap[value] || 3;
+    }
+    
+    private extractSupportNeeds(responses: Record<string, any>): string[] {
+      const needs: string[] = [];
+      
+      const supportField = responses['Do you have support needs that involve any of the following?'] || [];
+      if (Array.isArray(supportField)) {
+        if (supportField.includes('Space for a service animal')) needs.push('service_animal');
+        if (supportField.includes('A support person present')) needs.push('support_person');
+        if (supportField.includes('The use of communication aids')) needs.push('communication_aids');
+      }
+      
+      return needs;
+    }
+
+    async processAccessibilityForm(formData: {
+      clientId: string;
+      clientName: string;
+      clientEmail: string;
+      formResponses: Record<string, any>;
+    }): Promise<void> {
+      try {
+        // Map form responses to client preferences structure
+        const preference: ClientPreference = {
+          clientId: formData.clientId,
+          name: formData.clientName,
+          email: formData.clientEmail,
+          mobilityNeeds: this.extractMobilityNeeds(formData.formResponses),
+          sensoryPreferences: this.extractSensoryPreferences(formData.formResponses),
+          physicalNeeds: this.extractPhysicalNeeds(formData.formResponses),
+          roomConsistency: this.extractRoomConsistency(formData.formResponses),
+          supportNeeds: this.extractSupportNeeds(formData.formResponses),
+          specialFeatures: [], // Will be derived from other preferences
+          additionalNotes: formData.formResponses['Is there anything else we should know about your space or accessibility needs?'] || '',
+          lastUpdated: new Date().toISOString(),
+          preferredClinician: '',
+          assignedOffice: ''
+        };
+    
+        // Update client preferences
+        await this.updateClientPreference(preference);
+    
+        await this.addAuditLog({
+          timestamp: new Date().toISOString(),
+          eventType: AuditEventType.CLIENT_PREFERENCES_UPDATED,
+          description: `Processed accessibility form for client ${formData.clientId}`,
+          user: 'SYSTEM',
+          systemNotes: JSON.stringify(formData.formResponses)
+        });
+    
+      } catch (error) {
+        console.error('Error processing accessibility form:', error);
+        await this.addAuditLog({
+          timestamp: new Date().toISOString(),
+          eventType: AuditEventType.SYSTEM_ERROR,
+          description: `Failed to process accessibility form for client ${formData.clientId}`,
+          user: 'SYSTEM',
+          systemNotes: error instanceof Error ? error.message : 'Unknown error'
+        });
+        throw error;
+      }
+    }
+
+    /**
+     * Force refresh cache for a specific range
+     */
+    async refreshCache(range: string): Promise<void> {
+      this.cache.invalidate(`sheet:${range}`);
+    }
+  
+    /**
+     * Clear all cached data
+     */
+    clearCache(): void {
+      this.cache.clearAll();
+    }
+  }import { JWT } from 'google-auth-library';
+import { GoogleSheetsService } from './sheets';
+
+export function getGoogleAuthCredentials() {
+  try {
+    // Get raw environment variables
+    const rawKey = process.env.GOOGLE_SHEETS_PRIVATE_KEY;
+    const clientEmail = process.env.GOOGLE_SHEETS_CLIENT_EMAIL;
+    const spreadsheetId = process.env.GOOGLE_SHEETS_SPREADSHEET_ID;
+
+    // Validate presence
+    if (!rawKey || !clientEmail || !spreadsheetId) {
+      throw new Error('Missing required Google authentication environment variables');
+    }
+
+    // Clean and format private key - updated handling
+    const privateKey = rawKey.split(String.raw`\n`).join('\n');
+
+    // Validate key format
+    if (!privateKey.includes('BEGIN PRIVATE KEY') || !privateKey.includes('END PRIVATE KEY')) {
+      throw new Error('Invalid Google Sheets private key format');
+    }
+
+    // Validate email format
+    if (!clientEmail.includes('@') || !clientEmail.includes('.iam.gserviceaccount.com')) {
+      throw new Error('Invalid service account email format');
+    }
+
+    console.log('Credentials validation:', {
+      hasValidKey: privateKey.includes('BEGIN PRIVATE KEY'),
+      hasValidEmail: clientEmail.includes('@'),
+      hasSpreadsheetId: !!spreadsheetId
+    });
+
+    return {
+      private_key: privateKey,
+      client_email: clientEmail,
+      spreadsheetId
+    };
+  } catch (error: unknown) {
+    console.error('Credentials error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+    throw new Error(`Google authentication configuration error: ${errorMessage}`);
+  }
+}
+
+export function createGoogleAuthClient() {
+  const credentials = getGoogleAuthCredentials();
+  
+  return new JWT({
+    email: credentials.client_email,
+    key: credentials.private_key,
+    scopes: ['https://www.googleapis.com/auth/spreadsheets']
+  });
+}
+
+export async function initializeGoogleSheets(): Promise<GoogleSheetsService> {
+  try {
+    console.log('Starting Google Sheets initialization');
+    
+    const credentials = getGoogleAuthCredentials();
+    console.log('Got credentials, creating service');
+    
+    const sheetsService = new GoogleSheetsService(credentials, credentials.spreadsheetId);
+    
+    // Validate connection by attempting to read a small range
+    console.log('Testing connection with getOffices');
+    await sheetsService.getOffices();
+    
+    console.log('Google Sheets service initialized successfully');
+    return sheetsService;
+    
+  } catch (error: unknown) {
+    console.error('Detailed initialization error:', error);
+    throw new Error('Google Sheets service initialization failed');
+  }
+}// src/lib/intakeq/service.ts
+
+import type { IntakeQAppointment } from '@/types/webhooks';
+import type { StandardOfficeId } from '@/types/scheduling';
+import { GoogleSheetsService, AuditEventType } from '@/lib/google/sheets';
+import { standardizeOfficeId } from '@/lib/util/office-id';
+import crypto from 'crypto';
+
+export class IntakeQService {
+  private readonly baseUrl: string;
+  private readonly headers: HeadersInit;
+  private readonly MAX_RETRIES = 3;
+  private readonly RETRY_DELAY = 1000; // 1 second base delay
+
+  constructor(
+    private readonly apiKey: string,
+    private readonly sheetsService: GoogleSheetsService,
+    baseUrl: string = 'https://intakeq.com/api/v1',
+    private readonly useMockData: boolean = false
+  ) {
+    this.baseUrl = baseUrl;
+    this.headers = {
+      'X-Auth-Key': apiKey,
+      'Accept': 'application/json'
+    };
+  }
+
+  async getAppointments(startDate: string, endDate: string): Promise<IntakeQAppointment[]> {
+    try {
+      console.log('Fetching IntakeQ appointments:', { startDate, endDate });
+
+      // Convert dates to EST and set proper day boundaries
+      const requestedStart = new Date(startDate);
+      const requestedEnd = new Date(endDate);
+
+      // Ensure we're working with EST dates
+      const startEST = new Date(requestedStart.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+      const endEST = new Date(requestedEnd.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+      startEST.setHours(0, 0, 0, 0);
+      endEST.setHours(23, 59, 59, 999);
+
+      console.log('Date ranges (EST):', {
+        start: startEST.toISOString(),
+        end: endEST.toISOString()
+      });
+
+      const params = new URLSearchParams({
+        StartDate: startEST.toISOString(),
+        EndDate: endEST.toISOString(),
+        Status: 'Confirmed,WaitingConfirmation,Pending',
+        dateField: 'StartDateIso'
+      });
+
+      const url = `${this.baseUrl}/appointments?${params}`;
+
+      console.log('IntakeQ Request:', {
+        endpoint: '/appointments',
+        params: Object.fromEntries(params),
+        requestRange: {
+          start: startEST.toISOString(),
+          end: endEST.toISOString()
+        }
+      });
+
+      let attempt = 0;
+      let response;
+      let lastError;
+
+      while (attempt < this.MAX_RETRIES) {
+        try {
+          response = await fetch(url, {
+            method: 'GET',
+            headers: this.headers
+          });
+
+          if (response.ok) break;
+
+          const errorText = await response.text();
+          lastError = `HTTP ${response.status}: ${errorText}`;
+          
+          console.log(`Attempt ${attempt + 1} failed:`, {
+            status: response.status,
+            error: lastError,
+            headers: Object.fromEntries(response.headers.entries()),
+            url: url,
+            requestHeaders: this.headers
+          });
+
+          attempt++;
+          if (attempt < this.MAX_RETRIES) {
+            const delay = this.RETRY_DELAY * Math.pow(2, attempt - 1);
+            await new Promise(resolve => setTimeout(resolve, delay));
+          }
+        } catch (error) {
+          lastError = error instanceof Error ? error.message : 'Unknown error';
+          console.log(`Attempt ${attempt + 1} error:`, {
+            error: lastError,
+            url: url,
+            requestHeaders: this.headers
+          });
+          
+          attempt++;
+          if (attempt < this.MAX_RETRIES) {
+            const delay = this.RETRY_DELAY * Math.pow(2, attempt - 1);
+            await new Promise(resolve => setTimeout(resolve, delay));
+          }
+        }
+      }
+
+      if (!response || !response.ok) {
+        const errorMessage = `IntakeQ API error after ${this.MAX_RETRIES} attempts: ${lastError}`;
+        console.error('Final error details:', {
+          attempts: attempt,
+          lastError,
+          requestUrl: url,
+          requestHeaders: this.headers
+        });
+        throw new Error(errorMessage);
+      }
+
+      const text = await response.text();
+      console.log('Raw IntakeQ Response:', text.substring(0, 500) + '...');
+
+      const appointments = JSON.parse(text);
+
+      // Filter appointments to match requested date in EST
+      const filteredAppointments = appointments.filter((appt: IntakeQAppointment) => {
+        const apptDate = new Date(appt.StartDateIso);
+        const apptEST = new Date(apptDate.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+        apptEST.setHours(0, 0, 0, 0);  // Compare dates only
+
+        const targetEST = new Date(requestedStart.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+        targetEST.setHours(0, 0, 0, 0);  // Compare dates only
+
+        console.log('Appointment comparison:', {
+          id: appt.Id,
+          client: appt.ClientName,
+          apptDate: apptEST.toISOString(),
+          targetDate: targetEST.toISOString(),
+          matches: apptEST.getTime() === targetEST.getTime()
+        });
+
+        return apptEST.getTime() === targetEST.getTime();
+      });
+
+      console.log('IntakeQ Response:', {
+        status: response.status,
+        totalReturned: appointments.length,
+        matchingDateRange: filteredAppointments.length,
+        sampleAppointment: filteredAppointments[0] ? {
+          id: filteredAppointments[0].Id,
+          name: filteredAppointments[0].ClientName,
+          date: filteredAppointments[0].StartDateLocalFormatted,
+          status: filteredAppointments[0].Status
+        } : null
+      });
+
+      return filteredAppointments;
+    } catch (error) {
+      console.error('IntakeQ API Error:', error instanceof Error ? error.message : 'Unknown error');
+      
+      await this.sheetsService.addAuditLog({
+        timestamp: new Date().toISOString(),
+        eventType: AuditEventType.SYSTEM_ERROR,
+        description: 'IntakeQ API error',
+        user: 'SYSTEM',
+        systemNotes: error instanceof Error ? error.message : 'Unknown error'
+      });
+      
+      throw error;
+    }
+  }
+
+  async validateWebhookSignature(payload: string, signature: string): Promise<boolean> {
+    try {
+      const secret = process.env.INTAKEQ_WEBHOOK_SECRET;
+      if (!secret) {
+        console.error('Missing INTAKEQ_WEBHOOK_SECRET environment variable');
+        return false;
+      }
+
+      // Remove any quotes from the secret
+      const cleanSecret = secret.replace(/['"]/g, '');
+
+      // Create HMAC
+      const hmac = crypto.createHmac('sha256', cleanSecret);
+      hmac.update(payload);
+      const calculatedSignature = hmac.digest('hex');
+
+      console.log('Webhook Signature Validation:', {
+        signatureMatches: calculatedSignature === signature,
+        calculatedLength: calculatedSignature.length,
+        providedLength: signature.length,
+        payloadLength: payload.length,
+      });
+
+      return calculatedSignature === signature;
+    } catch (error) {
+      console.error('Webhook signature validation error:', error);
+      return false;
+    }
+  }
+
+  async testConnection(): Promise<boolean> {
+    try {
+      const response = await fetch(`${this.baseUrl}/practitioners`, {
+        headers: this.headers
+      });
+
+      console.log('IntakeQ Connection Test:', {
+        status: response.status,
+        ok: response.ok
+      });
+
+      return response.ok;
+    } catch (error) {
+      console.error('IntakeQ connection test failed:', error instanceof Error ? error.message : 'Unknown error');
+      return false;
+    }
+  }
+
+  private async getStandardizedOfficeId(appointment: IntakeQAppointment): Promise<StandardOfficeId> {
+    try {
+      // If appointment already has an office assignment from our system, use that
+      if (appointment.Location) {
+        return standardizeOfficeId(appointment.Location);
+      }
+
+      // Get clinician's default office
+      const clinicians = await this.sheetsService.getClinicians();
+      const clinician = clinicians.find(c => c.intakeQPractitionerId === appointment.PractitionerId);
+
+      if (clinician?.preferredOffices?.length) {
+        return standardizeOfficeId(clinician.preferredOffices[0]);
+      }
+
+      // Default to A-a if no other assignment possible
+      return 'A-a' as StandardOfficeId;
+    } catch (error) {
+      console.error('Error standardizing office ID:', error);
+      return 'A-a' as StandardOfficeId;
+    }
+  }
+
+  private isValidOfficeId(officeId: string): boolean {
+    return /^[A-Z]-[a-z]$/.test(officeId);
+  }
+}
