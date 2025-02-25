@@ -14,15 +14,21 @@ console.log('INTAKEQ_WEBHOOK_SECRET exists:', !!process.env.INTAKEQ_WEBHOOK_SECR
 import express, { Request, Response, NextFunction } from 'express';
 import testRoutes from './routes/test';
 import webhookRoutes from './routes/webhooks';
-import { captureRawBody } from './middleware/verify-signature';
 
 const app = express();
 
-// Special handling for IntakeQ webhook path - we need to capture the raw body before JSON parsing
-app.use('/api/webhooks/intakeq', captureRawBody);
+// Create a middleware to capture raw body for all requests
+app.use(express.json({
+  verify: (req: any, res, buf) => {
+    req.rawBody = buf.toString();
+  }
+}));
 
-// Regular JSON parsing for all other routes
-app.use(express.json());
+// Debug middleware to log request path and method
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+  next();
+});
 
 // Routes
 app.use('/api/test', testRoutes);
@@ -60,6 +66,11 @@ app.use((req: Request, res: Response) => {
     error: 'Not Found',
     timestamp: new Date().toISOString()
   });
+});
+
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
 });
 
 const port = process.env.PORT || 3001;
