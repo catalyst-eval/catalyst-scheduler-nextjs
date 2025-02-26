@@ -1,6 +1,6 @@
 import express from 'express';
 import type { Request, Response, NextFunction } from 'express';
-import { verifyIntakeQSignature, IntakeQSignatureRequest } from '../middleware/verify-signature';
+import { validateIntakeQWebhook, IntakeQWebhookRequest } from '../middleware/verify-signature';
 import { WebhookHandler } from '../lib/intakeq/webhook-handler';
 import { AppointmentSyncHandler } from '../lib/intakeq/appointment-sync';
 import GoogleSheetsService from '../lib/google/sheets';
@@ -13,11 +13,12 @@ const sheetsService = new GoogleSheetsService();
 const appointmentSyncHandler = new AppointmentSyncHandler(sheetsService);
 const webhookHandler = new WebhookHandler(sheetsService);
 
-// Define route handlers separately to avoid TypeScript issues
-const verifySignature = (req: Request, res: Response, next: NextFunction): void => {
-  verifyIntakeQSignature(req as IntakeQSignatureRequest, res, next);
-};
+// Apply basic validation middleware to the IntakeQ route
+router.use('/intakeq', (req: Request, res: Response, next: NextFunction) => {
+  validateIntakeQWebhook(req as IntakeQWebhookRequest, res, next);
+});
 
+// Define route handlers separately to avoid TypeScript issues
 const handleWebhook = async (req: Request, res: Response): Promise<void> => {
   const startTime = Date.now();
   console.log(`[${new Date().toISOString()}] Starting webhook processing`);
@@ -89,17 +90,18 @@ const handleTestWebhook = async (req: Request, res: Response): Promise<void> => 
     const payload = req.body;
     console.log('Received test webhook:', payload);
     
-    if (!payload || !payload.Type) {
+    if (!payload || !payload.ClientId) {
       res.status(400).json({
         success: false,
-        error: 'Invalid payload format. Must include Type field.'
+        error: 'Invalid payload format. Must include ClientId field.'
       });
       return;
     }
     
     // Process without signature verification
-    const isAppointmentEvent = payload.Type && (
-      payload.Type.includes('Appointment') || payload.Type.includes('appointment')
+    const eventType = payload.EventType || payload.Type;
+    const isAppointmentEvent = eventType && (
+      eventType.includes('Appointment') || eventType.includes('appointment')
     );
 
     // Use appropriate handler
@@ -163,15 +165,14 @@ const getHealth = (req: Request, res: Response): void => {
       intakeq: {
         enabled: true,
         config: {
-          secretConfigured: !!process.env.INTAKEQ_WEBHOOK_SECRET
+          apiKeyConfigured: !!process.env.INTAKEQ_API_KEY
         }
       }
     }
   });
 };
 
-// Apply middleware and routes
-router.use('/intakeq', verifySignature);
+// Apply routes
 router.post('/intakeq', handleWebhook);
 router.post('/test-webhook', handleTestWebhook);
 router.get('/recent', getRecentWebhooks);

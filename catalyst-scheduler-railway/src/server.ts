@@ -9,7 +9,7 @@ console.log('NODE_ENV:', process.env.NODE_ENV || 'not set');
 console.log('GOOGLE_SHEETS_PRIVATE_KEY exists:', !!process.env.GOOGLE_SHEETS_PRIVATE_KEY);
 console.log('GOOGLE_SHEETS_CLIENT_EMAIL exists:', !!process.env.GOOGLE_SHEETS_CLIENT_EMAIL);
 console.log('GOOGLE_SHEETS_SPREADSHEET_ID exists:', !!process.env.GOOGLE_SHEETS_SPREADSHEET_ID);
-console.log('INTAKEQ_WEBHOOK_SECRET exists:', !!process.env.INTAKEQ_WEBHOOK_SECRET);
+console.log('INTAKEQ_API_KEY exists:', !!process.env.INTAKEQ_API_KEY);
 
 import express, { Request, Response, NextFunction } from 'express';
 import testRoutes from './routes/test';
@@ -18,8 +18,7 @@ import { captureRawBody } from './middleware/verify-signature';
 
 const app = express();
 
-// Special handling for IntakeQ webhook path - we need to capture the raw body before JSON parsing
-// The correct way is to apply this middleware only to the specific webhook route
+// Special handling for IntakeQ webhook path - we need to capture the raw body
 app.use('/api/webhooks/intakeq', captureRawBody);
 
 // Regular JSON parsing for all other routes
@@ -39,7 +38,7 @@ app.get('/health', (req: Request, res: Response) => {
       GOOGLE_SHEETS_CLIENT_EMAIL: !!process.env.GOOGLE_SHEETS_CLIENT_EMAIL,
       GOOGLE_SHEETS_SPREADSHEET_ID: !!process.env.GOOGLE_SHEETS_SPREADSHEET_ID,
       GOOGLE_SHEETS_PRIVATE_KEY: !!process.env.GOOGLE_SHEETS_PRIVATE_KEY,
-      INTAKEQ_WEBHOOK_SECRET: !!process.env.INTAKEQ_WEBHOOK_SECRET
+      INTAKEQ_API_KEY: !!process.env.INTAKEQ_API_KEY
     }
   });
 });
@@ -75,4 +74,4 @@ if (require.main === module) {
   });
 }
 
-export { app };
+export default app;

@@ -26,4 +26,25 @@ router.get('/test-sheets', async (req, res) => {
         });
     }
 });
+router.get('/test-sheets-meta', async (req, res) => {
+    try {
+        // Access the private sheets instance directly for this test
+        const sheetsService = new sheets_1.default();
+        const spreadsheetId = process.env.GOOGLE_SHEETS_SPREADSHEET_ID;
+        const response = await sheetsService.sheets.spreadsheets.get({
+            spreadsheetId
+        });
+        res.json({
+            success: true,
+            sheets: response.data.sheets.map((sheet) => sheet.properties.title)
+        });
+    }
+    catch (error) {
+        console.error('Test sheets error:', error);
+        res.status(500).json({
+            success: false,
+            error: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
+});
 exports.default = router;

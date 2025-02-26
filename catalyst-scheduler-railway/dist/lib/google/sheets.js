@@ -25,28 +25,53 @@ var AuditEventType;
 })(AuditEventType || (exports.AuditEventType = AuditEventType = {}));
 class GoogleSheetsService {
     constructor() {
+        console.log('Google Sheets Service initializing...');
         if (!process.env.GOOGLE_SHEETS_PRIVATE_KEY || !process.env.GOOGLE_SHEETS_CLIENT_EMAIL) {
             throw new Error('Missing required Google Sheets credentials');
         }
-        const client = new google_auth_library_1.JWT({
-            email: process.env.GOOGLE_SHEETS_CLIENT_EMAIL,
-            key: process.env.GOOGLE_SHEETS_PRIVATE_KEY.replace(/\\n/g, '\n'),
-            scopes: ['https://www.googleapis.com/auth/spreadsheets']
-        });
-        this.sheets = googleapis_1.google.sheets({ version: 'v4', auth: client });
-        this.spreadsheetId = process.env.GOOGLE_SHEETS_SPREADSHEET_ID || '';
-        this.cache = new sheets_cache_1.SheetsCacheService();
+        // Handle different formats of private key
+        let privateKey = process.env.GOOGLE_SHEETS_PRIVATE_KEY;
+        // Replace literal \n with actual newlines
+        privateKey = privateKey.replace(/\\n/g, '\n');
+        // If key is enclosed in quotes, remove them
+        if (privateKey.startsWith('"') && privateKey.endsWith('"')) {
+            privateKey = privateKey.slice(1, -1);
+        }
+        console.log('Private key length:', privateKey.length);
+        console.log('Private key starts with:', privateKey.substring(0, 20) + '...');
+        try {
+            const client = new google_auth_library_1.JWT({
+                email: process.env.GOOGLE_SHEETS_CLIENT_EMAIL,
+                key: privateKey,
+                scopes: ['https://www.googleapis.com/auth/spreadsheets']
+            });
+            this.sheets = googleapis_1.google.sheets({ version: 'v4', auth: client });
+            this.spreadsheetId = process.env.GOOGLE_SHEETS_SPREADSHEET_ID || '';
+            this.cache = new sheets_cache_1.SheetsCacheService();
+            console.log('GoogleSheetsService initialized successfully');
+        }
+        catch (error) {
+            console.error('Error initializing Google Sheets client:', error);
+            throw error;
+        }
     }
     async readSheet(range) {
         const cacheKey = `sheet:${range}`;
         try {
             return await this.cache.getOrFetch(cacheKey, async () => {
                 console.log(`Reading sheet range: ${range}`);
-                const response = await this.sheets.spreadsheets.values.get({
-                    spreadsheetId: this.spreadsheetId,
-                    range,
-                });
-                return response.data.values;
+                try {
+                    const response = await this.sheets.spreadsheets.values.get({
+                        spreadsheetId: this.spreadsheetId,
+                        range,
+                    });
+                    console.log(`Successfully read sheet range: ${range}`);
+                    return response.data.values;
+                }
+                catch (error) {
+                    console.error(`Error in Google API call for range ${range}:`, error);
+                    throw error;
+                }
             }, 60000 // 1 minute cache TTL
             );
         }
