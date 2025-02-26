@@ -1,77 +1,7 @@
-// Define WebhookEventType directly here instead of importing it
-export type WebhookEventType = 
-  | 'Form Submitted'
-  | 'Intake Submitted'
-  | 'AppointmentCreated'
-  | 'AppointmentUpdated'
-  | 'AppointmentRescheduled'
-  | 'AppointmentCancelled'
-  | 'Appointment Created'  // Keep old formats for backward compatibility
-  | 'Appointment Updated'
-  | 'Appointment Rescheduled'
-  | 'Appointment Cancelled'
-  | 'AppointmentCanceled'
-  | 'Appointment Canceled'
-  | 'AppointmentDeleted'
-  | 'Appointment Deleted';
+// src/lib/intakeq/webhook-handler.ts
 
 import type { IGoogleSheetsService, AuditEventType } from '../google/sheets';
-
-// Interface for IntakeQ appointment data
-export interface IntakeQAppointment {
-  Id: string;
-  ClientName: string;
-  ClientEmail: string;
-  ClientPhone: string;
-  ClientDateOfBirth: string;
-  ClientId: number;
-  Status: string;
-  StartDate: number;
-  EndDate: number;
-  Duration: number;
-  ServiceName: string;
-  ServiceId: string;
-  LocationName: string;
-  LocationId: string;
-  Price: number;
-  PractitionerName: string;
-  PractitionerEmail: string;
-  PractitionerId: string;
-  IntakeId: string | null;
-  DateCreated: number;
-  CreatedBy: string;
-  BookedByClient: boolean;
-  ExternalClientId?: string;
-  StartDateIso: string;
-  EndDateIso: string;
-  StartDateLocal: string;
-  EndDateLocal: string;
-  StartDateLocalFormatted: string;
-  CancellationReason?: string;
-  RecurrencePattern?: {
-    frequency: 'weekly' | 'biweekly' | 'monthly';
-    occurrences: number;
-    endDate?: string;
-  };
-  [key: string]: any;
-}
-
-// Interface for IntakeQ webhook payload
-export interface IntakeQWebhookPayload {
-  IntakeId?: string;
-  Type?: WebhookEventType;  // Keep Type for backward compatibility
-  EventType?: WebhookEventType; // New field name
-  ClientId: number;
-  ClientName?: string;
-  ClientEmail?: string;
-  ExternalClientId?: string;
-  PracticeId?: string;
-  ExternalPracticeId?: string | null;
-  formId?: string;
-  responses?: Record<string, any>;
-  Appointment?: IntakeQAppointment;
-  ActionPerformedByClient?: boolean;
-}
+import { IntakeQWebhookPayload, WebhookEventType } from '../../types/webhooks';
 
 // Interface for webhook processing results
 export interface WebhookProcessingResult {
@@ -86,8 +16,7 @@ export class WebhookHandler {
   private readonly RETRY_DELAYS = [1000, 5000, 15000]; // Delays in milliseconds
 
   constructor(
-    private readonly sheetsService: IGoogleSheetsService,
-    private readonly appointmentSyncHandler?: any // Will be implemented in a separate file
+    private readonly sheetsService: IGoogleSheetsService
   ) {}
 
   /**
@@ -212,19 +141,16 @@ export class WebhookHandler {
           eventType.includes('AppointmentCreated') ||
           eventType.includes('AppointmentUpdated')) {
         
-        if (this.appointmentSyncHandler) {
-          result = await this.appointmentSyncHandler.processAppointmentEvent(payload);
-        } else {
-          // Temporary result until appointment sync is implemented
-          result = {
-            success: true,
-            details: {
-              message: 'Appointment sync handler not yet implemented',
-              appointmentId: payload.Appointment?.Id,
-              action: 'logged'
-            }
-          };
-        }
+        // Since we don't have the appointmentSync handler,
+        // we'll just log the event for now
+        result = {
+          success: true,
+          details: {
+            message: 'Appointment sync handler not yet implemented',
+            appointmentId: payload.Appointment?.Id,
+            action: 'logged'
+          }
+        };
       } else if (eventType.includes('Form Submitted') || eventType.includes('Intake Submitted')) {
         result = await this.handleIntakeSubmission(payload);
       } else {
