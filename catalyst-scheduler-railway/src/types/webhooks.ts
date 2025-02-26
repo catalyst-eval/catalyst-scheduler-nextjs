@@ -74,6 +74,7 @@ export interface WebhookResponse {
   success: boolean;
   error?: string;
   details?: any;
+  retryable?: boolean;
 }
 
 export class WebhookError extends Error {

@@ -1,9 +1,14 @@
-// src/lib/intakeq/webhook-handler.ts
+// Import webhook types
+import type {
+  WebhookEventType,
+  IntakeQAppointment,
+  IntakeQWebhookPayload,
+  WebhookResponse
+} from '../../types/webhooks';
 
 import type { IGoogleSheetsService, AuditEventType } from '../google/sheets';
-import { IntakeQWebhookPayload, WebhookEventType } from '../../types/webhooks';
 
-// Interface for webhook processing results
+// Interface for webhook processing results (kept for backward compatibility)
 export interface WebhookProcessingResult {
   success: boolean;
   error?: string;
@@ -33,7 +38,7 @@ export class WebhookHandler {
   async processWebhook(
     payload: unknown,
     signature?: string
-  ): Promise<WebhookProcessingResult> {
+  ): Promise<WebhookResponse> {
     try {
       // Validate webhook payload
       const validationResult = this.validateWebhook(payload);
@@ -96,19 +101,13 @@ export class WebhookHandler {
       return { isValid: false, error: 'Missing ClientId field' };
     }
 
-    // Type-specific validation
-    if (eventType.includes('Appointment Created') || 
-        eventType.includes('Appointment Updated') ||
-        eventType.includes('AppointmentCreated') ||
-        eventType.includes('AppointmentUpdated')) {
-      if (!typedPayload.Appointment) {
-        return { isValid: false, error: 'Missing appointment data' };
-      }
-
-      // Validate appointment fields
-      const appointment = typedPayload.Appointment;
-      if (!appointment.Id || !appointment.StartDateIso || !appointment.EndDateIso) {
-        return { isValid: false, error: 'Invalid appointment data' };
+    // Type-specific validation for non-appointment events (appointment events are handled by AppointmentSyncHandler)
+    if (!eventType.includes('Appointment') && !eventType.includes('appointment')) {
+      // For form submissions
+      if (eventType.includes('Form') || eventType.includes('Intake')) {
+        if (!typedPayload.responses) {
+          return { isValid: false, error: 'Missing form responses' };
+        }
       }
     }
 
@@ -121,9 +120,9 @@ export class WebhookHandler {
   private async processWithRetry(
     payload: IntakeQWebhookPayload,
     attempt: number = 0
-  ): Promise<WebhookProcessingResult> {
+  ): Promise<WebhookResponse> {
     try {
-      let result: WebhookProcessingResult;
+      let result: WebhookResponse;
   
       const eventType = this.getEventType(payload);
       console.log('Processing event type:', eventType);
@@ -136,30 +135,14 @@ export class WebhookHandler {
         };
       }
 
-      if (eventType.includes('Appointment Created') || 
-          eventType.includes('Appointment Updated') ||
-          eventType.includes('AppointmentCreated') ||
-          eventType.includes('AppointmentUpdated')) {
-        
-        // Since we don't have the appointmentSync handler,
-        // we'll just log the event for now
-        result = {
-          success: true,
-          details: {
-            message: 'Appointment sync handler not yet implemented',
-            appointmentId: payload.Appointment?.Id,
-            action: 'logged'
-          }
-        };
-      } else if (eventType.includes('Form Submitted') || eventType.includes('Intake Submitted')) {
+      // Handle non-appointment events (appointment events should be handled by AppointmentSyncHandler)
+      if (eventType.includes('Form Submitted') || eventType.includes('Intake Submitted')) {
         result = await this.handleIntakeSubmission(payload);
-      } else {
+      } else if (!eventType.includes('Appointment') && !eventType.includes('appointment')) {
         console.log('Unhandled event type:', {
           receivedType: eventType,
           payloadType: payload.Type,
           expectedTypes: [
-            'Appointment Created',
-            'Appointment Updated',
             'Form Submitted',
             'Intake Submitted'
           ]
@@ -167,6 +150,13 @@ export class WebhookHandler {
         return {
           success: false,
           error: `Unsupported webhook type: ${eventType}`,
+          retryable: false
+        };
+      } else {
+        // Return a message indicating this should be handled by AppointmentSyncHandler
+        return {
+          success: false,
+          error: 'Appointment events should be handled by AppointmentSyncHandler',
           retryable: false
         };
       }
@@ -222,7 +212,7 @@ export class WebhookHandler {
    */
   private async handleIntakeSubmission(
     payload: IntakeQWebhookPayload
-  ): Promise<WebhookProcessingResult> {
+  ): Promise<WebhookResponse> {
     try {
       // Log initial receipt of form
       await this.sheetsService.addAuditLog({
