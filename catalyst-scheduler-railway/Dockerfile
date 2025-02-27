@@ -2,19 +2,20 @@ FROM node:18-alpine
 
 WORKDIR /app
 
-# Copy package files first
+# Copy package files
 COPY package*.json ./
 
-# Install dependencies
+# Install dependencies with legacy-peer-deps to avoid conflicts
 RUN npm install --legacy-peer-deps
 
-# Copy source files
+# Copy all source code
 COPY . .
 
 # Create the dist directory
 RUN mkdir -p dist
 
-# Copy TypeScript files to dist directory to bypass the build issue
+# Simple workaround to avoid TypeScript build issues
+# Copy TypeScript files to dist directory as JavaScript files
 RUN find src -name "*.ts" -exec sh -c 'mkdir -p "dist/$(dirname "{}")" && cp "{}" "dist/$(dirname "{}")/$(basename "{}" .ts).js"' \;
 
 # Expose port
