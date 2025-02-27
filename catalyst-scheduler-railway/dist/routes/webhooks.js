@@ -1,4 +1,13 @@
 "use strict";
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -19,7 +28,8 @@ router.use('/intakeq', (req, res, next) => {
     (0, verify_signature_1.validateIntakeQWebhook)(req, res, next);
 });
 // Define route handlers separately to avoid TypeScript issues
-const handleWebhook = async (req, res) => {
+const handleWebhook = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     const startTime = Date.now();
     console.log(`[${new Date().toISOString()}] Starting webhook processing`);
     try {
@@ -27,7 +37,7 @@ const handleWebhook = async (req, res) => {
         console.log('Received webhook:', {
             type: payload.EventType || payload.Type,
             clientId: payload.ClientId,
-            appointmentId: payload.Appointment?.Id,
+            appointmentId: (_a = payload.Appointment) === null || _a === void 0 ? void 0 : _a.Id,
             timestamp: new Date().toISOString()
         });
         // Check if it's an appointment event
@@ -37,12 +47,9 @@ const handleWebhook = async (req, res) => {
         const processPromise = isAppointmentEvent
             ? appointmentSyncHandler.processAppointmentEvent(payload)
             : webhookHandler.processWebhook(payload);
-        const result = await processPromise;
+        const result = yield processPromise;
         const processingTime = Date.now() - startTime;
-        console.log('Webhook event processed:', {
-            ...result,
-            processingTime: `${processingTime}ms`
-        });
+        console.log('Webhook event processed:', Object.assign(Object.assign({}, result), { processingTime: `${processingTime}ms` }));
         // Return appropriate response
         if (!result.success) {
             res.status(400).json({
@@ -75,8 +82,8 @@ const handleWebhook = async (req, res) => {
             timestamp: new Date().toISOString()
         });
     }
-};
-const handleTestWebhook = async (req, res) => {
+});
+const handleTestWebhook = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const payload = req.body;
         console.log('Received test webhook:', payload);
@@ -95,7 +102,7 @@ const handleTestWebhook = async (req, res) => {
             ? appointmentSyncHandler.processAppointmentEvent(payload)
             : webhookHandler.processWebhook(payload);
         try {
-            const result = await processPromise;
+            const result = yield processPromise;
             res.json({
                 success: result.success,
                 data: result.details,
@@ -118,11 +125,11 @@ const handleTestWebhook = async (req, res) => {
             timestamp: new Date().toISOString()
         });
     }
-};
-const getRecentWebhooks = async (req, res) => {
+});
+const getRecentWebhooks = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const limit = req.query.limit ? parseInt(req.query.limit) : 10;
-        const logs = await sheetsService.getRecentAuditLogs(limit);
+        const logs = yield sheetsService.getRecentAuditLogs(limit);
         const webhookLogs = logs.filter(log => log.eventType === 'WEBHOOK_RECEIVED' ||
             log.eventType.includes('APPOINTMENT_'));
         res.json({
@@ -138,7 +145,7 @@ const getRecentWebhooks = async (req, res) => {
             timestamp: new Date().toISOString()
         });
     }
-};
+});
 const getHealth = (req, res) => {
     res.json({
         status: 'healthy',
