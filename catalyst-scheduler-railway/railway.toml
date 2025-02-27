@@ -1,6 +1,5 @@
 [build]
-builder = "NIXPACKS"
+builder = "DOCKERFILE"
 
 [deploy]
-startCommand = "node dist/server.js"
-restartPolicy = "on-failure"
+startCommand = ""

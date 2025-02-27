@@ -2,11 +2,12 @@ FROM node:18-alpine
 
 WORKDIR /app
 
-# Copy package files
+# Copy package files first (for better caching)
 COPY package.json ./
+COPY package-lock.json ./
 
-# Install dependencies with regular npm install instead of npm ci
-RUN npm install --force
+# Install dependencies
+RUN npm install --legacy-peer-deps
 
 # Copy source code
 COPY . .
