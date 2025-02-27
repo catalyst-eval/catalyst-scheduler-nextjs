@@ -2,14 +2,16 @@ FROM node:18-alpine
 
 WORKDIR /app
 
-# Copy package files first (for better caching)
-COPY package.json ./
-COPY package-lock.json ./
+# Copy package.json and package-lock.json
+COPY package.json package-lock.json ./
 
-# Install dependencies
-RUN npm install --legacy-peer-deps
+# First just try to install production dependencies
+RUN npm install --only=production --no-package-lock
 
-# Copy source code
+# Then install development dependencies
+RUN npm install --no-package-lock
+
+# Copy the rest of the application
 COPY . .
 
 # Build the application
