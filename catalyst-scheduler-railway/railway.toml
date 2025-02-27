@@ -3,5 +3,4 @@ builder = "NIXPACKS"
 
 [deploy]
 startCommand = "node dist/server.js"
-restartPolicyType = "on-failure"
-restartPolicyMaxRetries = 10
+restartPolicy = "on-failure"
