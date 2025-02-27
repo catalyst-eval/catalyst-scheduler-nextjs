@@ -1,35 +1,30 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.captureRawBody = captureRawBody;
+exports.handleIntakeQWebhook = handleIntakeQWebhook;
 exports.validateIntakeQWebhook = validateIntakeQWebhook;
 /**
- * Middleware to capture the raw request body from IntakeQ webhook
+ * Simple middleware that just passes the request through
+ * This removes the encoding conflict that was causing issues
  */
-function captureRawBody(req, res, next) {
-    let data = '';
-    req.setEncoding('utf8');
-    req.on('data', chunk => {
-        data += chunk;
+function handleIntakeQWebhook(req, res, next) {
+    console.log('Webhook received:', {
+        headers: req.headers,
+        contentType: req.headers['content-type'],
+        timestamp: new Date().toISOString()
     });
-    req.on('end', () => {
-        req.rawBody = data;
-        next();
-    });
-    req.on('error', (error) => {
-        console.error('Error capturing raw body:', error);
-        next(error);
-    });
+    // Just pass through without trying to set stream encoding
+    next();
 }
 /**
  * Basic validation for IntakeQ webhooks
+ * Without signature verification for now
  */
 function validateIntakeQWebhook(req, res, next) {
     try {
         const payload = req.body;
         // Log all incoming webhooks for debugging
-        console.log('Webhook headers:', req.headers);
-        console.log('Webhook body:', payload);
-        // Minimal validation - proceed with most payloads
+        console.log('Webhook payload:', payload);
+        // Minimal validation
         if (!payload) {
             console.warn('Empty webhook payload');
             return res.status(400).json({
@@ -38,7 +33,16 @@ function validateIntakeQWebhook(req, res, next) {
                 timestamp: new Date().toISOString()
             });
         }
-        // Payload exists, proceed
+        // Check for required fields
+        if ((!payload.Type && !payload.EventType) || !payload.ClientId) {
+            console.warn('Invalid webhook format', payload);
+            return res.status(400).json({
+                success: false,
+                error: 'Invalid webhook format. Required fields missing.',
+                timestamp: new Date().toISOString()
+            });
+        }
+        // Payload is valid, proceed
         next();
     }
     catch (error) {

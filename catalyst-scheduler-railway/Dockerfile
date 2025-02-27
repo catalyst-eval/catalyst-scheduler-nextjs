@@ -5,21 +5,17 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies with legacy-peer-deps to avoid conflicts
-RUN npm install --legacy-peer-deps
+# Install dependencies
+RUN npm ci
 
-# Copy all source code
+# Copy source code
 COPY . .
 
-# Create the dist directory
-RUN mkdir -p dist
-
-# Simple workaround to avoid TypeScript build issues
-# Copy TypeScript files to dist directory as JavaScript files
-RUN find src -name "*.ts" -exec sh -c 'mkdir -p "dist/$(dirname "{}")" && cp "{}" "dist/$(dirname "{}")/$(basename "{}" .ts).js"' \;
+# Build TypeScript
+RUN npm run build
 
 # Expose port
 EXPOSE 3000
 
-# Start the app
+# Start application
 CMD ["node", "dist/server.js"]

@@ -1,5 +1,5 @@
-import express from 'express';
-import type { Request, Response, NextFunction } from 'express';
+// src/routes/webhooks.ts
+import express, { Request, Response, NextFunction } from 'express';
 import { validateIntakeQWebhook, IntakeQWebhookRequest } from '../middleware/verify-signature';
 import { WebhookHandler } from '../lib/intakeq/webhook-handler';
 import { AppointmentSyncHandler } from '../lib/intakeq/appointment-sync';
@@ -15,7 +15,7 @@ const webhookHandler = new WebhookHandler(sheetsService);
 
 // Apply basic validation middleware to the IntakeQ route
 router.use('/intakeq', (req: Request, res: Response, next: NextFunction) => {
-  validateIntakeQWebhook(req as IntakeQWebhookRequest, res, next);
+  validateIntakeQWebhook(req, res, next);
 });
 
 // Define route handlers separately to avoid TypeScript issues

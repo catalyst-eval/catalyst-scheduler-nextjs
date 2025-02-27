@@ -1,29 +1,38 @@
+// src/middleware/verify-signature.ts
 import { Request, Response, NextFunction } from 'express';
 
+// Extend the Request interface to include rawBody
 export interface IntakeQWebhookRequest extends Request {
   rawBody?: string;
 }
 
 /**
- * Simple pass-through middleware that doesn't touch the request body
+ * Simple middleware that just passes the request through
+ * This removes the encoding conflict that was causing issues
  */
 export function handleIntakeQWebhook(req: Request, res: Response, next: NextFunction) {
-  // Just pass through to the next middleware
+  console.log('Webhook received:', {
+    headers: req.headers,
+    contentType: req.headers['content-type'],
+    timestamp: new Date().toISOString()
+  });
+  
+  // Just pass through without trying to set stream encoding
   next();
 }
 
 /**
  * Basic validation for IntakeQ webhooks
+ * Without signature verification for now
  */
-export function validateIntakeQWebhook(req: IntakeQWebhookRequest, res: Response, next: NextFunction) {
+export function validateIntakeQWebhook(req: Request, res: Response, next: NextFunction) {
   try {
     const payload = req.body;
     
     // Log all incoming webhooks for debugging
-    console.log('Webhook headers:', req.headers);
-    console.log('Webhook body:', payload);
+    console.log('Webhook payload:', payload);
     
-    // Minimal validation - proceed with most payloads
+    // Minimal validation
     if (!payload) {
       console.warn('Empty webhook payload');
       return res.status(400).json({ 
@@ -33,7 +42,17 @@ export function validateIntakeQWebhook(req: IntakeQWebhookRequest, res: Response
       });
     }
     
-    // Payload exists, proceed
+    // Check for required fields
+    if ((!payload.Type && !payload.EventType) || !payload.ClientId) {
+      console.warn('Invalid webhook format', payload);
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Invalid webhook format. Required fields missing.',
+        timestamp: new Date().toISOString() 
+      });
+    }
+    
+    // Payload is valid, proceed
     next();
   } catch (error) {
     console.error('Error processing webhook:', error);

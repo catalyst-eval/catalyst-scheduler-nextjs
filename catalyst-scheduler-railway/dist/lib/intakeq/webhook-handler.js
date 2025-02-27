@@ -1,13 +1,4 @@
 "use strict";
-var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
-    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
-    return new (P || (P = Promise))(function (resolve, reject) {
-        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
-        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
-        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
-        step((generator = generator.apply(thisArg, _arguments || [])).next());
-    });
-};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.WebhookHandler = void 0;
 class WebhookHandler {
@@ -26,44 +17,42 @@ class WebhookHandler {
     /**
      * Process incoming webhook with validation and retries
      */
-    processWebhook(payload, signature) {
-        return __awaiter(this, void 0, void 0, function* () {
-            try {
-                // Validate webhook payload
-                const validationResult = this.validateWebhook(payload);
-                if (!validationResult.isValid) {
-                    yield this.logWebhookError('VALIDATION_ERROR', validationResult.error || 'Unknown validation error', payload);
-                    return {
-                        success: false,
-                        error: validationResult.error,
-                        retryable: false
-                    };
-                }
-                const typedPayload = payload;
-                // Log webhook receipt
-                yield this.sheetsService.addAuditLog({
-                    timestamp: new Date().toISOString(),
-                    eventType: 'WEBHOOK_RECEIVED',
-                    description: `Received ${this.getEventType(typedPayload)} webhook`,
-                    user: 'INTAKEQ_WEBHOOK',
-                    systemNotes: JSON.stringify({
-                        type: this.getEventType(typedPayload),
-                        clientId: typedPayload.ClientId
-                    })
-                });
-                // Process with retry logic
-                return yield this.processWithRetry(typedPayload);
-            }
-            catch (error) {
-                const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-                yield this.logWebhookError('PROCESSING_ERROR', errorMessage, payload);
+    async processWebhook(payload, signature) {
+        try {
+            // Validate webhook payload
+            const validationResult = this.validateWebhook(payload);
+            if (!validationResult.isValid) {
+                await this.logWebhookError('VALIDATION_ERROR', validationResult.error || 'Unknown validation error', payload);
                 return {
                     success: false,
-                    error: errorMessage,
-                    retryable: this.isRetryableError(error)
+                    error: validationResult.error,
+                    retryable: false
                 };
             }
-        });
+            const typedPayload = payload;
+            // Log webhook receipt
+            await this.sheetsService.addAuditLog({
+                timestamp: new Date().toISOString(),
+                eventType: 'WEBHOOK_RECEIVED',
+                description: `Received ${this.getEventType(typedPayload)} webhook`,
+                user: 'INTAKEQ_WEBHOOK',
+                systemNotes: JSON.stringify({
+                    type: this.getEventType(typedPayload),
+                    clientId: typedPayload.ClientId
+                })
+            });
+            // Process with retry logic
+            return await this.processWithRetry(typedPayload);
+        }
+        catch (error) {
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            await this.logWebhookError('PROCESSING_ERROR', errorMessage, payload);
+            return {
+                success: false,
+                error: errorMessage,
+                retryable: this.isRetryableError(error)
+            };
+        }
     }
     /**
      * Validate webhook payload and signature
@@ -96,149 +85,145 @@ class WebhookHandler {
     /**
      * Process webhook with retry logic
      */
-    processWithRetry(payload_1) {
-        return __awaiter(this, arguments, void 0, function* (payload, attempt = 0) {
-            try {
-                let result;
-                const eventType = this.getEventType(payload);
-                console.log('Processing event type:', eventType);
-                if (!eventType) {
-                    return {
-                        success: false,
-                        error: 'Missing event type',
-                        retryable: false
-                    };
-                }
-                // Handle non-appointment events (appointment events should be handled by AppointmentSyncHandler)
-                if (eventType.includes('Form Submitted') || eventType.includes('Intake Submitted')) {
-                    result = yield this.handleIntakeSubmission(payload);
-                }
-                else if (!eventType.includes('Appointment') && !eventType.includes('appointment')) {
-                    console.log('Unhandled event type:', {
-                        receivedType: eventType,
-                        payloadType: payload.Type,
-                        expectedTypes: [
-                            'Form Submitted',
-                            'Intake Submitted'
-                        ]
-                    });
-                    return {
-                        success: false,
-                        error: `Unsupported webhook type: ${eventType}`,
-                        retryable: false
-                    };
-                }
-                else {
-                    // Return a message indicating this should be handled by AppointmentSyncHandler
-                    return {
-                        success: false,
-                        error: 'Appointment events should be handled by AppointmentSyncHandler',
-                        retryable: false
-                    };
-                }
-                if (!result.success && result.retryable && attempt < this.MAX_RETRIES) {
-                    // Log retry attempt
-                    yield this.sheetsService.addAuditLog({
-                        timestamp: new Date().toISOString(),
-                        eventType: 'WEBHOOK_RECEIVED',
-                        description: `Retry attempt ${attempt + 1} for ${eventType}`,
-                        user: 'SYSTEM',
-                        systemNotes: JSON.stringify({
-                            attempt: attempt + 1,
-                            type: eventType,
-                            clientId: payload.ClientId
-                        })
-                    });
-                    // Wait for delay
-                    yield new Promise(resolve => setTimeout(resolve, this.RETRY_DELAYS[attempt]));
-                    // Retry processing
-                    return this.processWithRetry(payload, attempt + 1);
-                }
-                return result;
-            }
-            catch (error) {
-                const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-                // Log error
-                yield this.logWebhookError('RETRY_ERROR', `Error on attempt ${attempt + 1}: ${errorMessage}`, payload);
-                // Determine if another retry should be attempted
-                if (this.isRetryableError(error) && attempt < this.MAX_RETRIES) {
-                    yield new Promise(resolve => setTimeout(resolve, this.RETRY_DELAYS[attempt]));
-                    return this.processWithRetry(payload, attempt + 1);
-                }
+    async processWithRetry(payload, attempt = 0) {
+        try {
+            let result;
+            const eventType = this.getEventType(payload);
+            console.log('Processing event type:', eventType);
+            if (!eventType) {
                 return {
                     success: false,
-                    error: errorMessage,
+                    error: 'Missing event type',
                     retryable: false
                 };
             }
-        });
+            // Handle non-appointment events (appointment events should be handled by AppointmentSyncHandler)
+            if (eventType.includes('Form Submitted') || eventType.includes('Intake Submitted')) {
+                result = await this.handleIntakeSubmission(payload);
+            }
+            else if (!eventType.includes('Appointment') && !eventType.includes('appointment')) {
+                console.log('Unhandled event type:', {
+                    receivedType: eventType,
+                    payloadType: payload.Type,
+                    expectedTypes: [
+                        'Form Submitted',
+                        'Intake Submitted'
+                    ]
+                });
+                return {
+                    success: false,
+                    error: `Unsupported webhook type: ${eventType}`,
+                    retryable: false
+                };
+            }
+            else {
+                // Return a message indicating this should be handled by AppointmentSyncHandler
+                return {
+                    success: false,
+                    error: 'Appointment events should be handled by AppointmentSyncHandler',
+                    retryable: false
+                };
+            }
+            if (!result.success && result.retryable && attempt < this.MAX_RETRIES) {
+                // Log retry attempt
+                await this.sheetsService.addAuditLog({
+                    timestamp: new Date().toISOString(),
+                    eventType: 'WEBHOOK_RECEIVED',
+                    description: `Retry attempt ${attempt + 1} for ${eventType}`,
+                    user: 'SYSTEM',
+                    systemNotes: JSON.stringify({
+                        attempt: attempt + 1,
+                        type: eventType,
+                        clientId: payload.ClientId
+                    })
+                });
+                // Wait for delay
+                await new Promise(resolve => setTimeout(resolve, this.RETRY_DELAYS[attempt]));
+                // Retry processing
+                return this.processWithRetry(payload, attempt + 1);
+            }
+            return result;
+        }
+        catch (error) {
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            // Log error
+            await this.logWebhookError('RETRY_ERROR', `Error on attempt ${attempt + 1}: ${errorMessage}`, payload);
+            // Determine if another retry should be attempted
+            if (this.isRetryableError(error) && attempt < this.MAX_RETRIES) {
+                await new Promise(resolve => setTimeout(resolve, this.RETRY_DELAYS[attempt]));
+                return this.processWithRetry(payload, attempt + 1);
+            }
+            return {
+                success: false,
+                error: errorMessage,
+                retryable: false
+            };
+        }
     }
     /**
      * Handle intake form submission
      */
-    handleIntakeSubmission(payload) {
-        return __awaiter(this, void 0, void 0, function* () {
-            try {
-                // Log initial receipt of form
-                yield this.sheetsService.addAuditLog({
-                    timestamp: new Date().toISOString(),
-                    eventType: 'WEBHOOK_RECEIVED',
-                    description: `Processing intake form ${payload.formId}`,
-                    user: 'INTAKEQ_WEBHOOK',
-                    systemNotes: JSON.stringify({
-                        formId: payload.formId,
-                        clientId: payload.ClientId,
-                        isFullIntake: !!payload.IntakeId
-                    })
-                });
-                // Ensure we have responses to process
-                if (!payload.responses) {
-                    return {
-                        success: false,
-                        error: 'No form responses provided',
-                        retryable: false
-                    };
-                }
-                // Process responses based on form type
-                const formResponses = payload.IntakeId ?
-                    this.extractAccessibilitySection(payload.responses) :
-                    payload.responses;
-                // Validate processed responses
-                if (Object.keys(formResponses).length === 0) {
-                    return {
-                        success: false,
-                        error: 'No valid accessibility responses found',
-                        retryable: false
-                    };
-                }
-                // Process form data
-                yield this.sheetsService.processAccessibilityForm({
-                    clientId: payload.ClientId.toString(),
-                    clientName: payload.ClientName || 'Unknown Client',
-                    clientEmail: payload.ClientEmail || 'unknown@example.com',
-                    formResponses: formResponses
-                });
-                // Return success response
-                return {
-                    success: true,
-                    details: {
-                        formId: payload.formId,
-                        clientId: payload.ClientId,
-                        type: payload.IntakeId ? 'full-intake' : 'accessibility-form',
-                        source: payload.IntakeId ? 'embedded' : 'standalone'
-                    }
-                };
-            }
-            catch (error) {
-                const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-                yield this.logWebhookError('FORM_PROCESSING_ERROR', errorMessage, payload);
+    async handleIntakeSubmission(payload) {
+        try {
+            // Log initial receipt of form
+            await this.sheetsService.addAuditLog({
+                timestamp: new Date().toISOString(),
+                eventType: 'WEBHOOK_RECEIVED',
+                description: `Processing intake form ${payload.formId}`,
+                user: 'INTAKEQ_WEBHOOK',
+                systemNotes: JSON.stringify({
+                    formId: payload.formId,
+                    clientId: payload.ClientId,
+                    isFullIntake: !!payload.IntakeId
+                })
+            });
+            // Ensure we have responses to process
+            if (!payload.responses) {
                 return {
                     success: false,
-                    error: errorMessage,
-                    retryable: this.isRetryableError(error)
+                    error: 'No form responses provided',
+                    retryable: false
                 };
             }
-        });
+            // Process responses based on form type
+            const formResponses = payload.IntakeId ?
+                this.extractAccessibilitySection(payload.responses) :
+                payload.responses;
+            // Validate processed responses
+            if (Object.keys(formResponses).length === 0) {
+                return {
+                    success: false,
+                    error: 'No valid accessibility responses found',
+                    retryable: false
+                };
+            }
+            // Process form data
+            await this.sheetsService.processAccessibilityForm({
+                clientId: payload.ClientId.toString(),
+                clientName: payload.ClientName || 'Unknown Client',
+                clientEmail: payload.ClientEmail || 'unknown@example.com',
+                formResponses: formResponses
+            });
+            // Return success response
+            return {
+                success: true,
+                details: {
+                    formId: payload.formId,
+                    clientId: payload.ClientId,
+                    type: payload.IntakeId ? 'full-intake' : 'accessibility-form',
+                    source: payload.IntakeId ? 'embedded' : 'standalone'
+                }
+            };
+        }
+        catch (error) {
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            await this.logWebhookError('FORM_PROCESSING_ERROR', errorMessage, payload);
+            return {
+                success: false,
+                error: errorMessage,
+                retryable: this.isRetryableError(error)
+            };
+        }
     }
     /**
      * Determine if an error is retryable
@@ -263,19 +248,17 @@ class WebhookHandler {
     /**
      * Log webhook error
      */
-    logWebhookError(errorType, message, payload) {
-        return __awaiter(this, void 0, void 0, function* () {
-            yield this.sheetsService.addAuditLog({
-                timestamp: new Date().toISOString(),
-                eventType: 'SYSTEM_ERROR',
-                description: `Webhook ${errorType}: ${message}`,
-                user: 'SYSTEM',
-                systemNotes: JSON.stringify({
-                    errorType,
-                    payload,
-                    timestamp: new Date().toISOString()
-                })
-            });
+    async logWebhookError(errorType, message, payload) {
+        await this.sheetsService.addAuditLog({
+            timestamp: new Date().toISOString(),
+            eventType: 'SYSTEM_ERROR',
+            description: `Webhook ${errorType}: ${message}`,
+            user: 'SYSTEM',
+            systemNotes: JSON.stringify({
+                errorType,
+                payload,
+                timestamp: new Date().toISOString()
+            })
         });
     }
     /**

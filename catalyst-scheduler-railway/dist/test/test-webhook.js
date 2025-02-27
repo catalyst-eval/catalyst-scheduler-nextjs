@@ -1,13 +1,4 @@
 "use strict";
-var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
-    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
-    return new (P || (P = Promise))(function (resolve, reject) {
-        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
-        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
-        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
-        step((generator = generator.apply(thisArg, _arguments || [])).next());
-    });
-};
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -36,40 +27,38 @@ function generateSignature(payload) {
 /**
  * Send test webhook
  */
-function sendTestWebhook(payload) {
-    return __awaiter(this, void 0, void 0, function* () {
-        // Convert payload to JSON string
-        const payloadStr = JSON.stringify(payload);
-        // Generate signature
-        const signature = generateSignature(payloadStr);
-        console.log('Sending test webhook to:', WEBHOOK_URL);
-        console.log('Payload:', payload);
-        console.log('Signature:', signature);
-        try {
-            // Send request with signature header
-            const response = yield axios_1.default.post(WEBHOOK_URL, payload, {
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-IntakeQ-Signature': signature
-                }
+async function sendTestWebhook(payload) {
+    // Convert payload to JSON string
+    const payloadStr = JSON.stringify(payload);
+    // Generate signature
+    const signature = generateSignature(payloadStr);
+    console.log('Sending test webhook to:', WEBHOOK_URL);
+    console.log('Payload:', payload);
+    console.log('Signature:', signature);
+    try {
+        // Send request with signature header
+        const response = await axios_1.default.post(WEBHOOK_URL, payload, {
+            headers: {
+                'Content-Type': 'application/json',
+                'X-IntakeQ-Signature': signature
+            }
+        });
+        console.log('Response status:', response.status);
+        console.log('Response data:', response.data);
+        return response.data;
+    }
+    catch (error) {
+        if (axios_1.default.isAxiosError(error) && error.response) {
+            console.error('Error response:', {
+                status: error.response.status,
+                data: error.response.data
             });
-            console.log('Response status:', response.status);
-            console.log('Response data:', response.data);
-            return response.data;
         }
-        catch (error) {
-            if (axios_1.default.isAxiosError(error) && error.response) {
-                console.error('Error response:', {
-                    status: error.response.status,
-                    data: error.response.data
-                });
-            }
-            else {
-                console.error('Error sending webhook:', error);
-            }
-            throw error;
+        else {
+            console.error('Error sending webhook:', error);
         }
-    });
+        throw error;
+    }
 }
 /**
  * Generate test appointment created payload
@@ -118,20 +107,18 @@ function createAppointmentCreatedPayload() {
 /**
  * Run the test
  */
-function runTest() {
-    return __awaiter(this, void 0, void 0, function* () {
-        try {
-            // Create test payload
-            const payload = createAppointmentCreatedPayload();
-            // Send test webhook
-            yield sendTestWebhook(payload);
-            console.log('Test completed successfully');
-        }
-        catch (error) {
-            console.error('Test failed:', error);
-            process.exit(1);
-        }
-    });
+async function runTest() {
+    try {
+        // Create test payload
+        const payload = createAppointmentCreatedPayload();
+        // Send test webhook
+        await sendTestWebhook(payload);
+        console.log('Test completed successfully');
+    }
+    catch (error) {
+        console.error('Test failed:', error);
+        process.exit(1);
+    }
 }
 // Run test if executed directly
 if (require.main === module) {
