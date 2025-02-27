@@ -14,16 +14,15 @@ console.log('INTAKEQ_API_KEY exists:', !!process.env.INTAKEQ_API_KEY);
 import express, { Request, Response, NextFunction } from 'express';
 import testRoutes from './routes/test';
 import webhookRoutes from './routes/webhooks';
-import { captureRawBody } from './middleware/verify-signature';
+import { handleIntakeQWebhook } from './middleware/verify-signature';
 
 const app = express();
 
-// Special handling for IntakeQ webhook path - we need to capture the raw body
-// IMPORTANT: This middleware should run BEFORE the JSON parser
-app.use('/api/webhooks/intakeq', captureRawBody);
-
-// Regular JSON parsing for all other routes
+// Use JSON parsing for ALL routes - simplify our approach
 app.use(express.json());
+
+// Apply our empty middleware just to maintain the route structure
+app.use('/api/webhooks/intakeq', handleIntakeQWebhook);
 
 // Routes
 app.use('/api/test', testRoutes);
