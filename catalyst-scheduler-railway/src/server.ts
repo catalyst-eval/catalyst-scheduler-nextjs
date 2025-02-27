@@ -19,6 +19,7 @@ import { captureRawBody } from './middleware/verify-signature';
 const app = express();
 
 // Special handling for IntakeQ webhook path - we need to capture the raw body
+// IMPORTANT: This middleware should run BEFORE the JSON parser
 app.use('/api/webhooks/intakeq', captureRawBody);
 
 // Regular JSON parsing for all other routes

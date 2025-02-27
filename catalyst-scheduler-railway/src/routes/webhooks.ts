@@ -161,6 +161,7 @@ const getHealth = (req: Request, res: Response): void => {
   res.json({
     status: 'healthy',
     timestamp: new Date().toISOString(),
+    message: 'Webhook service is running correctly',
     webhooks: {
       intakeq: {
         enabled: true,
@@ -168,7 +169,8 @@ const getHealth = (req: Request, res: Response): void => {
           apiKeyConfigured: !!process.env.INTAKEQ_API_KEY
         }
       }
-    }
+    },
+    environment: process.env.NODE_ENV
   });
 };
 

@@ -8,23 +8,29 @@ export interface IntakeQWebhookRequest extends Request {
  * Middleware to capture the raw request body from IntakeQ webhook
  */
 export function captureRawBody(req: IntakeQWebhookRequest, res: Response, next: NextFunction) {
+  // Don't set encoding - this is causing the conflict
   let data = '';
   
-  req.setEncoding('utf8');
-  
-  req.on('data', chunk => {
-    data += chunk;
-  });
-  
-  req.on('end', () => {
-    req.rawBody = data;
-    next();
-  });
+  // Only capture the raw body if we don't already have it
+  if (!req.body) {
+    req.on('data', chunk => {
+      data += chunk;
+    });
+    
+    req.on('end', () => {
+      req.rawBody = data;
+      next();
+    });
 
-  req.on('error', (error) => {
-    console.error('Error capturing raw body:', error);
-    next(error);
-  });
+    req.on('error', (error) => {
+      console.error('Error capturing raw body:', error);
+      next(error);
+    });
+  } else {
+    // If body is already parsed, just continue
+    req.rawBody = JSON.stringify(req.body);
+    next();
+  }
 }
 
 /**
